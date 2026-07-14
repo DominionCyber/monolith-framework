@@ -1,0 +1,42 @@
+name: monolith_mac_decode_xzfilewritten
+description: Decodes event fields using conditional logic to standardize values across different event sources.
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- xzfilewritten
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for FileCategory (11 value branches; final `*` is the fallthrough)
+  | case {
+      FileCategory = "0"  | FileCategory := "OTHER";
+      FileCategory = "1"  | FileCategory := "ARCHIVES";
+      FileCategory = "2"  | FileCategory := "OFFICE_DOCUMENTS";
+      FileCategory = "3"  | FileCategory := "MULTIMEDIA_FILES";
+      FileCategory = "4"  | FileCategory := "DESIGN_FILES";
+      FileCategory = "5"  | FileCategory := "SOURCE_CODE";
+      FileCategory = "6"  | FileCategory := "EXECUTABLE_FILES";
+      FileCategory = "7"  | FileCategory := "VIRTUAL_MACHINE_FILES";
+      FileCategory = "8"  | FileCategory := "EMAIL_FILES";
+      FileCategory = "9"  | FileCategory := "DATA_AND_LOGS";
+      FileCategory = "10" | FileCategory := "ENCRYPTED";
+      *
+  }

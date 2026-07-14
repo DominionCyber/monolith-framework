@@ -1,0 +1,48 @@
+name: monolith_mac_decode_dnsrequest
+description: Decodes event fields using conditional logic to standardize values across different event sources.
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- dnsrequest
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for RequestType (8 value branches; final `*` is the fallthrough)
+  | case {
+      RequestType = "1"   | RequestType := "A";
+      RequestType = "2"   | RequestType := "NS";
+      RequestType = "5"   | RequestType := "CNAME";
+      RequestType = "12"  | RequestType := "PTR";
+      RequestType = "15"  | RequestType := "MX";
+      RequestType = "16"  | RequestType := "TXT";
+      RequestType = "28"  | RequestType := "AAAA";
+      RequestType = "255" | RequestType := "ANY";
+      *
+  }
+
+  // case {}: enum decoder for QueryStatus (4 value branches; final `*` is the fallthrough)
+  | case {
+      QueryStatus = "9701"       | QueryStatus := "DNS_ERROR_RECORD_DOES_NOT_EXIST";
+      QueryStatus = "9003"       | QueryStatus := "DNS_ERROR_RCODE_NAME_ERROR";
+      QueryStatus = "4278190081" | QueryStatus := "CS_ERROR_SINGLE_RESPONSE_EXPECTING_DUAL";
+      QueryStatus = "4278190082" | QueryStatus := "CS_ERROR_DUAL_RECORDS";
+      *
+  }

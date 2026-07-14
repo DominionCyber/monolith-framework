@@ -1,0 +1,45 @@
+name: monolith_mac_base_archivefilecontent
+description: 'Base query for ArchiveFileContent events. Decodes archive-extraction content listings with parent archive reference and per-entry metadata. NO SAMPLE DATA available at build time.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- archivefilecontent
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=ArchiveFileContent event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()      // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper() // Decodes Falcon numeric enums/bitfields into readable strings
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,         // Human-readable UTC event time (from helper)
+          ContextTimeStamp, // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName, // Endpoint hostname
+          aid,          // Falcon agent ID; primary host key
+          // ▰▰▰[ Archive ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ArchiveFileIdentifier, // Unique ID of the parent archive (joins to original FileWritten event)
+          ArchiveFileName,       // Path of the parent archive
+          // ▰▰▰[ Content Entry ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ArchivedFileName, // Path of the file inside the archive
+          ArchivedFileSize, // Size in bytes of the archived entry
+          SHA256HashData    // SHA-256 of the archived entry
+      ],
+      limit=max
+  )

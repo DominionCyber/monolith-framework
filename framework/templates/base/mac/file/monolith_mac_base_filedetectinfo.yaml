@@ -1,0 +1,50 @@
+name: monolith_mac_base_filedetectinfo
+description: 'Base query for FileDetectInfo events on Mac. Surfaces Falcon file-detection metadata with target file identity, pattern match, and disposition.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- filedetectinfo
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=FileDetectInfo event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()          // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()     // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_filedetectinfo() // Decodes TemplateDisposition and AuthenticationId in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,            // Human-readable UTC event time (from helper)
+          ContextTimeStamp,    // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,        // Endpoint hostname
+          aid,                 // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,    // UPID of the process that triggered the detection; joins to ProcessRollup2
+          TreeId,              // Process tree ID; groups related events
+          AuthenticationId,    // Auth session ID (decoded; 5 values)
+          // ▰▰▰[ Detected File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,      // Full path of the detected file
+          SourceFileName,      // Source path if the file was moved/copied
+          // ▰▰▰[ Detection ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          PatternId,           // CrowdStrike pattern ID that matched
+          TemplateDisposition, // Detection disposition (decoded; 10 values)
+          TemplateInstanceId  // Specific template instance ID
+      ],
+      limit=max
+  )

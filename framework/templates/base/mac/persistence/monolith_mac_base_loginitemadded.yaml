@@ -1,0 +1,50 @@
+name: monolith_mac_base_loginitemadded
+description: Base query for LoginItemAdded events. Decodes login-item additions (LSSharedFileList) for persistence detection.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- loginitemadded
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=LoginItemAdded event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()             // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()        // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_uid()                  // Adds UID_readable sibling (e.g. root, daemon); leaves UID raw
+  | $monolith_mac_decode_loginitemadded()    // Decodes LaunchItemType (5 values: USER_ITEM, APP, LOGIN_ITEM, AGENT, DAEMON)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,          // Human-readable UTC event time (from helper)
+          ContextTimeStamp,  // Raw event time on host (epoch + ms); no readable conversion yet
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,      // Endpoint hostname
+          aid,               // Falcon agent ID; primary host key
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UID,               // POSIX UID (4294967295 = uint32 sentinel for "no user context", i.e. system-level addition)
+          UID_readable,      // Human-readable UID label (from convert_uid helper); raw value when not in known-name list
+          UserName,          // Responsible user's OS account (sensor-enriched via ResponsiblePid; sparse, ~67% in this sample)
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,  // UPID of the process that emitted the event (often a system daemon)
+          ResponsiblePid,    // UPID of the user-facing process responsible for the addition (e.g. the app being installed)
+          // ▰▰▰[ Login Item ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          LaunchItemUrl,     // Path to the login item being added (e.g. Contents/Library/LaunchAgents/<bundle>.plist)
+          LaunchItemType     // Login item category (decoded: USER_ITEM, APP, LOGIN_ITEM, AGENT, DAEMON)
+      ],
+      limit=max
+  )

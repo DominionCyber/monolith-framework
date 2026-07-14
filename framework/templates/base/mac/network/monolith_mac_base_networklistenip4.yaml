@@ -1,0 +1,60 @@
+name: monolith_mac_base_networklistenip4
+description: 'Base query for NetworkListenIP4 events. Decodes IPv4 socket-listen metadata with full process context and listener endpoint details.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- networklistenip4
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=NetworkListenIP4 event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()            // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()       // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_networklistenip4() // Decodes Protocol (9 vals), ConnectionFlags (bitmask, 5 flags -> ConnectionFlags_mask), ConnectionDirection (5 vals) in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,         // Human-readable UTC event time (from helper)
+          ContextTimeStamp, // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName, // Endpoint hostname
+          aid,          // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId, // UPID of the listening process; joins to ProcessRollup2
+          ContextThreadId,  // Thread ID within the listening process
+          TreeId,           // Process tree ID; groups related events
+          InContext,        // 1 if event emitted in the context of the originating process/thread
+          // ▰▰▰[ Container ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          OciContainerId, // OCI container ID if listener originated inside a container (rare on Mac)
+          PodId,          // Kubernetes pod ID (rare on Mac)
+          // ▰▰▰[ Listener Endpoint ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          LocalAddressIP4, // Local IPv4 address the socket is listening on (0.0.0.0 = all interfaces)
+          LocalPort,       // Local TCP/UDP port the socket is listening on
+          // ▰▰▰[ Peer (for accepted connections) ]▰▰▰▰▰▰▰▰▰▰▰▰
+          RemoteAddressIP4,    // Remote IPv4 address of an accepted peer (may be null for new listen)
+          RemotePort,          // Remote TCP/UDP port of an accepted peer (may be null)
+          RemoteAddressString, // Stringified remote address (optional)
+          RemoteIP,            // Parser-derived alias for RemoteAddressIP4
+          // ▰▰▰[ Flow Characteristics ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          Protocol,            // Network protocol (decoded: TCP, UDP, ICMP, ...)
+          ConnectionDirection, // OUTBOUND / INBOUND / NEITHER / BOTH / UNKNOWN (decoded)
+          ConnectionFlags,     // Raw socket bitmask (0 = normal connection)
+          ConnectionFlags_mask // Human-readable bitmask flags (RAW_SOCKET, IS_LOOPBACK, ...) from helper
+      ],
+      limit=max
+  )

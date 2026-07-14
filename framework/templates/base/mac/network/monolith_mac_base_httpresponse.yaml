@@ -1,0 +1,67 @@
+name: monolith_mac_base_httpresponse
+description: 'Base query for HttpResponse events on Mac. Decodes Falcon-extracted HTTP response metadata (status, status text, headers) with full process context and effective-endpoint enrichment. Pairs with HttpRequest via ContextProcessId + HttpExchangeIndex for request/response correlation.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- httpresponse
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=HttpResponse event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()        // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()   // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_httpresponse() // Decodes HttpStatus, HttpMethod, ConnectionDirection, TrafficDirection in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                  // Human-readable UTC event time (from helper)
+          ContextTimeStamp,          // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,              // Endpoint hostname
+          aid,                       // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,          // UPID of the requesting process; joins to ProcessRollup2
+          ImageFileName,             // Full path of the requesting process binary
+          CommandLine,               // Command line of the requesting process
+          ProxyingProcessId,         // UPID of the proxying process
+          // ▰▰▰[ Connection Direction ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ConnectionDirection,       // OUTBOUND / INBOUND / NEITHER / BOTH / UNKNOWN (decoded; 5 values)
+          TrafficDirection,          // Traffic direction (decoded; 2 values: INGRESS, EGRESS)
+          // ▰▰▰[ Endpoints (Direct) ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          LocalAddressIP4,           // Local IPv4 address (parser-derived enrichment)
+          LocalPort,                 // Local TCP/UDP port
+          RemoteAddressIP4,          // Remote IPv4 address (HTTP server)
+          RemoteAddressIP6,          // Remote IPv6 address
+          RemotePort,                // Remote TCP/UDP port
+          DomainName,                // Domain name (parsed from HttpHost or DNS resolution)
+          // ▰▰▰[ Endpoints (Effective, post-proxy) ]▰▰▰▰▰▰▰▰▰▰
+          EffectiveRemoteAddressIP4, // Effective remote IPv4 after proxy unwrapping
+          EffectiveRemoteAddressIP6, // Effective remote IPv6 after proxy unwrapping
+          EffectiveRemotePort,       // Effective remote port after proxy unwrapping
+          EffectiveDomainName,       // Effective domain after proxy unwrapping
+          // ▰▰▰[ HTTP Response ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          HttpStatus,                // HTTP status code (decoded; 69 known values: 200_OK, 404_NOT_FOUND, 500_INTERNAL_SERVER_ERROR, ...)
+          HttpStatusText,            // Status reason phrase (e.g. "OK", "Found", "Not Found")
+          HttpMethod,                // HTTP method of the originating request (decoded; 41 values)
+          HttpPath,                  // Request URI path of the originating request
+          HttpResponseHeader,        // Full response header dump (raw text)
+          HttpHeaderIsTruncated,     // 1 if HttpResponseHeader was truncated, else 0
+          HttpExchangeIndex         // Sequential index; pairs with HttpRequest.HttpExchangeIndex for request/response join
+      ],
+      limit=max
+  )

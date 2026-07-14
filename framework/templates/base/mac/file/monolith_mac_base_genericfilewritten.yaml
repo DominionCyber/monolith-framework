@@ -1,0 +1,61 @@
+name: monolith_mac_base_genericfilewritten
+description: Base query for GenericFileWritten events on Mac. Surfaces catch-all file-write telemetry for writes that do not match a more specific *FileWritten event signature (i.e. not a known archive/script/Mach-O/PEM/cert format). Useful for inventorying file activity on external/removable media, tracking Spotlight indexing footprints, and detecting payloads written with non-standard extensions or in unusual locations.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- genericfilewritten
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=GenericFileWritten event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()           // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()      // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_size()          // Coalesces Size into ByteSize/CommonSize (human-readable size)
+  | $monolith_convert_removable_disk()     // Rewrites IsOnRemovableDisk 0/1 → No/Yes in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                    // Human-readable UTC event time (from helper)
+          ContextTimeStamp,            // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                // Endpoint hostname
+          aid,                         // Falcon agent ID; primary host key
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                    // OS account that owns the writing process ("_unknown" for kernel/system writes)
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,            // UPID of the writing process; joins to ProcessRollup2
+          ContextThreadId,             // UTID of the writing thread; commonly 0 (sentinel) for kernel-level writes
+          ContextBaseFileName,         // Basename of the writing process binary (e.g. "mds", "Slack Helper")
+          TreeId,                      // Process tree ID; groups related events
+          // ▰▰▰[ Written File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,              // Full path of the written file
+          FilePath,                    // Directory portion (parser-derived from TargetFileName)
+          FileName,                    // Basename portion (parser-derived from TargetFileName)
+          FileSourcePath,              // Source path the file came from (sparse; populated when written by copy/move)
+          FileIdentifier,              // Sensor-side file identifier (24-byte hex; pivot key for the unique file)
+          SHA256HashData,              // SHA-256 of the written file (sentinel values for not-computed cases NOT decoded per framework rule)
+          // ▰▰▰[ File Properties ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          Size,                        // Written file size in bytes
+          CommonSize,                  // Human-readable size (from helper: e.g. "37 B", "289 MB")
+          IsOnRemovableDisk,           // Drive type: Yes (external/USB/network) or No (internal); converted in place
+          // ▰▰▰[ Volume ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DiskParentDeviceInstanceId,  // Physical device identifier (e.g. "USB\VID_04E8&PID_61F5\..." for Samsung T5)
+          VolumeSessionUUID            // Volume session correlation identifier
+      ],
+      limit=max
+  )

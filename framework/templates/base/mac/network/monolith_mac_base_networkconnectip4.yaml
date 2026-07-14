@@ -1,0 +1,65 @@
+name: monolith_mac_base_networkconnectip4
+description: Base query for NetworkConnectIP4 events. Decodes connection metadata and enriches RemoteIP with ASN and geolocation.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- networkconnectip4
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=NetworkConnectIP4 event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()           // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_networkconnectip4()    // Decodes Protocol (9 vals), ConnectionDirection (5 vals), ConnectionFlags (5-bit bitmask → ConnectionFlags_mask)
+  | asn(RemoteIP)                               // Enriches RemoteIP with .asn and .org
+  | ipLocation(RemoteIP)                        // Enriches RemoteIP with .country and .city
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,              // Human-readable UTC event time (from helper)
+          ContextTimeStamp,      // Raw event time on host (epoch + ms); no readable conversion yet
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,          // Endpoint hostname
+          aid,                   // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,      // UPID of the process initiating the connection; joins to ProcessRollup2
+          ContextThreadId,       // Thread ID within the connecting process
+          ContextBaseFileName,   // Basename of the connecting process binary (e.g. mdmclient)
+          TreeId,                // Process tree ID; groups related events
+          // ▰▰▰[ Connection ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          Protocol,              // Network protocol (decoded: TCP, UDP, ICMP, GRE, ...)
+          ConnectionDirection,   // OUTBOUND / INBOUND / NEITHER / BOTH / UNKNOWN (decoded by helper)
+          ConnectionFlags,       // Raw socket bitmask (0 = normal connection)
+          ConnectionFlags_mask,  // Human-readable bitmask flags (RAW_SOCKET, IS_LOOPBACK, ...) from helper
+          InContext,             // 1 if event emitted in the context of the originating process/thread
+          CommunityID,           // Zeek-style flow hash (parser-derived); joins flows across sensors
+          // ▰▰▰[ Local Endpoint ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          LocalIP,               // Local IPv4 address (parser-derived; often 0.0.0.0 for outbound SYN-time events)
+          LocalPort,             // Local TCP/UDP port (parser-derived; often 0 for SYN-time events)
+          // ▰▰▰[ Remote Endpoint ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          RemoteIP,              // Remote IPv4 address (parser-derived)
+          RemotePort,             // Remote TCP/UDP port
+          RemoteIP.asn,          // Autonomous System Number for RemoteIP (from asn enrichment)
+          RemoteIP.org,          // ASN organization name (e.g. "Microsoft Corporation") (from asn enrichment)
+          RemoteIP.country,      // ISO country code for RemoteIP (from ipLocation enrichment)
+          RemoteIP.city,         // City for RemoteIP (from ipLocation enrichment)
+          // ▰▰▰[ TCP Diagnostics ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TcpConnectErrorCode    // 0 on success; non-zero error codes documented (TIMED_OUT=110, REFUSED=111, ...)
+      ],
+      limit=max
+  )

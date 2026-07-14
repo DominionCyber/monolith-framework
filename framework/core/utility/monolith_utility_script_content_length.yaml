@@ -1,0 +1,28 @@
+name: monolith_utility_script_content_length
+description: 'Computes the character count of ScriptContent into the new field ScriptContentLength. Uses text:length() so the count is in Unicode grapheme clusters (emoji and non-BMP characters count as one). Complements the sensor-provided OriginalContentLength (which counts bytes).'
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- utility
+- script_content_length
+- global
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ UTILITY ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | text:length(ScriptContent, as="ScriptContentLength")  // text:length(): character count of ScriptContent into ScriptContentLength. Pair with OriginalContentLength (sensor-provided byte count) to spot binary or heavily-encoded content where bytes-per-character is unusually high.

@@ -1,0 +1,33 @@
+name: monolith_convert_file_extension
+description: 'Parses the FileName field to extract the final dotted extension into a new field FileExtension. Returns "(none)" when no extension is present (typical for compiled binaries with no .ext suffix). Pure string utility; does not require any decoder.'
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- convert
+- file_extension
+- global
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ CONVERSION ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | case {                                                                                  // case {}: branch on whether FileName has a dot at all
+      FileName = /\./                                                                      //   match any FileName containing a literal period
+    | regex("(?P<FileExtension>[^.]+)$", field=FileName, strict=false);                     //   regex(): capture trailing non-dot characters into FileExtension (named group)
+      *                                                                                     //   fallthrough: no dot in FileName
+    | FileExtension := "(none)";                                                            //   write sentinel so the column is always populated
+  }

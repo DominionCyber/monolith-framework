@@ -1,0 +1,57 @@
+name: monolith_mac_base_fileextendedattroperation
+description: Base query for FileExtendedAttrOperation events. Decodes xattr operations on macOS files (quarantine, provenance, etc.).
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- fileextendedattroperation
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=FileExtendedAttrOperation event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                      // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()                 // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_size()                     // Computes CommonSize: byte size in human-readable form (TB/GB/MB/KB)
+  | $monolith_mac_decode_fileextendedattroperation()  // Decodes ExtendedAttributeModificationType, ExtendedAttributeStatus, and VnodeType enums
+  | $monolith_convert_extended_attribute_name()       // Categorizes ExtendedAttributeName into a high-level ExtendedAttributeCategory bucket
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                          // Human-readable UTC event time (from helper)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                      // Endpoint hostname
+          aid,                               // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,                  // UPID of the process performing the xattr op; joins to ProcessRollup2
+          // ▰▰▰[ File Details ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,                    // Full path of the file the xattr operation targeted
+          FilePath,                          // Directory portion of TargetFileName (parser-derived)
+          FileName,                          // Basename portion of TargetFileName (parser-derived)
+          FileIdentifier,                    // Sensor-assigned unique file ID
+          VnodeType,                         // File system object type (decoded: VREG, VDIR, VLNK, ...)
+          Size,                              // File size in bytes
+          CommonSize,                        // File size, human-readable (from convert_file_size helper)
+          // ▰▰▰[ Extended Attribute Operation ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ExtendedAttributeName,             // Raw xattr name (e.g. com.apple.quarantine, com.apple.metadata:kMDItemWhereFroms)
+          ExtendedAttributeCategory,         // High-level bucket of the xattr name (QUARANTINE, PROVENANCE_URL, MACL, ...) (from helper)
+          ExtendedAttributeModificationType, // SET or DELETE (decoded by helper)
+          ExtendedAttributeStatus,           // Operation result: NO_ERR or a POSIX-style error code (decoded by helper)
+          ExtendedAttributeValueReadable,    // Sensor-decoded form of the xattr value (e.g. URL list for kMDItemWhereFroms)
+          ExtendedAttributeValue             // Raw hex-encoded xattr value (often a binary plist)
+      ],
+      limit=max
+  )

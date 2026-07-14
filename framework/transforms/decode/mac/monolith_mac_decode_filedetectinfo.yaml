@@ -1,0 +1,45 @@
+name: monolith_mac_decode_filedetectinfo
+description: 'Decodes TemplateDisposition (10-value enum) and AuthenticationId (5-value enum) on FileDetectInfo events.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- filedetectinfo
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for TemplateDisposition (10 value branches; final `*` is the fallthrough)
+  | case {
+      TemplateDisposition = "0"  | TemplateDisposition := "TEMPLATE_DISPOSITION_NOACTION";
+      TemplateDisposition = "3"  | TemplateDisposition := "TEMPLATE_DISPOSITION_ANALYSIS";
+      TemplateDisposition = "4"  | TemplateDisposition := "TEMPLATE_DISPOSITION_SENSOR_ONLY";
+      TemplateDisposition = "10" | TemplateDisposition := "TEMPLATE_DISPOSITION_INDICATOR";
+      TemplateDisposition = "20" | TemplateDisposition := "TEMPLATE_DISPOSITION_DETECT";
+      TemplateDisposition = "25" | TemplateDisposition := "TEMPLATE_DISPOSITION_OPERATION_BLOCK";
+      TemplateDisposition = "30" | TemplateDisposition := "TEMPLATE_DISPOSITION_PREVENT";
+      TemplateDisposition = "60" | TemplateDisposition := "TEMPLATE_DISPOSITION_PREVENT_KILLPARENT";
+      TemplateDisposition = "61" | TemplateDisposition := "TEMPLATE_DISPOSITION_PREVENT_KILLSOURCE";
+      TemplateDisposition = "70" | TemplateDisposition := "TEMPLATE_DISPOSITION_CONTAINMENT_FS_SERVER";
+      *
+  }
+
+  // case {}: enum decoder for AuthenticationId (5 value branches; final `*` is the fallthrough)
+  | case {
+      AuthenticationId = "0"    | AuthenticationId := "INVALID_LUID";
+      AuthenticationId = "996"  | AuthenticationId := "NETWORK_SERVICE";
+      AuthenticationId = "997"  | AuthenticationId := "LOCAL_SERVICE";
+      AuthenticationId = "999"  | AuthenticationId := "SYSTEM";
+      AuthenticationId = "1000" | AuthenticationId := "RESERVED_LUID_MAX";
+      *
+  }

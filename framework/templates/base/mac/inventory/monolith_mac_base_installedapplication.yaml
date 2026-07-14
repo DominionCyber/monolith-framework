@@ -1,0 +1,59 @@
+name: monolith_mac_base_installedapplication
+description: Base query for InstalledApplication events on Mac. Surfaces application-inventory telemetry with decoded AppPathFlag and UpdateFlag values. InstalledApplication fires for each app inventory record from the sensor; useful for fleet inventory, supply-chain visibility, and pre-execution malware staging detection.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- installedapplication
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=InstalledApplication event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                  // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()             // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_installedapplication()   // Decodes AppPathFlag (15 enum values) and UpdateFlag (6 enum values) in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                  // Human-readable UTC event time (from helper)
+          InstallDate,               // Epoch timestamp when the application was installed
+          BatchTimestamp,            // Epoch when the inventory batch was emitted (groups records by batch)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,              // Endpoint hostname
+          aid,                       // Falcon agent ID; primary host key
+          // ▰▰▰[ Application Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          AppName,                   // Application name (e.g. "Windows App.app", "Safari.app")
+          AppIdentificationData,     // Bundle identifier (e.g. com.microsoft.rdc.macos); pivotal for inventory hunts
+          AppVendor,                 // Vendor identifier (e.g. com.microsoft, com.apple)
+          AppVersion,                // Application version string
+          AppArchitecture,           // CPU architecture (aarch64, x86_64, universal)
+          AppPath,                   // Full path of the installed application bundle
+          AppPathFlag,               // Path category (decoded: SYSTEM_BIN, USER_APP, ...; 15 values)
+          // ▰▰▰[ Source & Provenance ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          AppProvider,               // Source provider numeric enum (e.g. 3 = App Store)
+          AppSource,                 // Per-app source UUID (sparse; populated for App Store / MDM-deployed apps)
+          AppType,                   // App-type enum (4 = standard macOS application bundle, ...)
+          UpdateFlag,                // Update state (decoded: NEW_INSTALL, UPDATE, REMOVAL, ...; 6 enum values)
+          Entitlements,              // Raw bitmask of entitlements granted (bitfield decoder is a framework TODO)
+          // ▰▰▰[ Integrity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          SHA256HashData,            // SHA-256 of the application's primary executable
+          // ▰▰▰[ Batch ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          BatchDataNumber,           // This record's position within the batch (e.g. 330 of 465)
+          BatchDataTotal             // Total records in this batch (the inventory snapshot size)
+      ],
+      limit=max
+  )

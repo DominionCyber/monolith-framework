@@ -1,0 +1,39 @@
+name: monolith_convert_extended_attribute_name
+description: 'Buckets ExtendedAttributeName into a high-level ExtendedAttributeCategory for hunt-friendly filtering. Recognizes security-significant xattrs (quarantine, provenance, MACL) and common system xattrs (Finder info, resource fork, Time Machine). Falls back to the raw name when no category matches.'
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- convert
+- extended_attribute_name
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ CONVERSION ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | case {                                                                                          // case {}: bucket each xattr into a hunt category
+      ExtendedAttributeName = "com.apple.quarantine"                      | ExtendedAttributeCategory := "QUARANTINE";          // Gatekeeper-tracked download flag
+      ExtendedAttributeName = "com.apple.macl"                            | ExtendedAttributeCategory := "MACL";                // Mandatory Access Control List (TCC)
+      ExtendedAttributeName = "com.apple.FinderInfo"                      | ExtendedAttributeCategory := "FINDER_INFO";         // Legacy HFS+ Finder metadata
+      ExtendedAttributeName = "com.apple.ResourceFork"                    | ExtendedAttributeCategory := "RESOURCE_FORK";       // Legacy Mac resource fork (mostly historical)
+      ExtendedAttributeName = "com.apple.cprotect"                        | ExtendedAttributeCategory := "CONTENT_PROTECTION";  // Per-file data-protection class
+      ExtendedAttributeName = "com.apple.metadata:kMDItemWhereFroms"      | ExtendedAttributeCategory := "PROVENANCE_URL";      // Source URL set on download
+      ExtendedAttributeName = "com.apple.metadata:kMDItemDownloadedDate"  | ExtendedAttributeCategory := "DOWNLOAD_DATE";       // Timestamp set on download
+      ExtendedAttributeName = "com.apple.metadata:kMDItemUserTags"        | ExtendedAttributeCategory := "FINDER_TAGS";         // Finder colour tags
+      ExtendedAttributeName = /^com\\.apple\\.metadata:_kTimeMachine/ | ExtendedAttributeCategory := "TIME_MACHINE";        // Time Machine backup metadata family
+      *                                                                   | ExtendedAttributeCategory := ExtendedAttributeName; // fallthrough: surface raw name so column is always populated
+  }

@@ -1,0 +1,197 @@
+name: monolith_mac_match_processrollup2_enhanced
+description: 'Verbose parent-child ProcessRollup2 join on Mac. The L1 stream is the child PR2 with its own fields aliased to Child* (so they survive the join), the L2 stream is the parent PR2 with native fields. One output row per (host, parent process, child process) tuple with full attribution on both sides: hashes, UIDs, signing posture, MachO subtype, entitlements, and command lines for both parent and child.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- match
+- processrollup2
+- enhanced
+- syntheticprocessrollup2
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ L1 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Builds the CHILD-perspective lookup table. Decode + helper enrichment runs
+  // first so the coalesce step can capture the decoded values, then the coalesce
+  // helper aliases the child's own fields to Child* so they do not collide with
+  // L2's parent PR2 fields after the match() join.
+  defineTable(
+      query={
+        #event_simpleName=/ProcessRollup2/ event_platform=Mac
+        | $monolith_convert_file_extension()       // Parses FileName into FileExtension before aliasing
+        | $monolith_convert_uid()                  // Adds UID_readable before aliasing
+        | $monolith_convert_gid()                  // Adds GID_readable before aliasing
+        | $monolith_mac_decode_processrollup2()    // Decodes MachOSubType (8 vals) and CodeSigningFlags (27-bit mask) before aliasing
+        | $monolith_mac_coalesce_processrollup2()  // Aliases child PR2's own fields to Child* (FilePath -> ChildFilePath, etc.)
+      },
+      name=child_processes,
+      include=[
+          // ▰▰▰[ Match Key ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ParentProcessId,          // Child's parent UPID; joins to L2.TargetProcessId
+          // ▰▰▰[ Child Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ChildProcessId,           // Child's own UPID (aliased from TargetProcessId)
+          ChildRawProcessId,        // Child's OS-level PID
+          ChildUserName,            // OS account that owns the child
+          ChildUID,                 // Child's effective UID (numeric)
+          ChildGID,                 // Child's effective GID (numeric)
+          // ▰▰▰[ Child Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ChildImageFileName,       // Child's full image path
+          ChildFilePath,            // Child's directory portion
+          ChildFileName,            // Child's basename
+          ChildOriginalFilename,    // Child's Info.plist OriginalFilename if signed
+          ChildSHA256HashData,      // Child binary hash
+          // ▰▰▰[ Child Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ChildCommandLine,         // Child's command line as exec'd
+          // ▰▰▰[ Child Code Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ChildMachOSubType,        // Child binary type (decoded: EXECUTABLE64, DYLIB64, BUNDLE64, KEXT64, etc.)
+          ChildCodeSigningFlags,    // Child signing-flags mask (decoded: SIGNED, RUNTIME, HARD, etc.)
+          ChildProcessEntitlements  // Child's Mach-O entitlements (sandbox/privilege capabilities)
+      ]
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Pulls ProcessRollup2 events to be enriched as the parent side of the join.
+  | #event_simpleName=/ProcessRollup2/ event_platform=Mac
+
+  // ▰▰▰▰▰▰[ MATCH STATEMENT ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Inner join: keep only L2 PR2 events whose TargetProcessId matches a row's
+  // ParentProcessId in the child_processes table. Surviving L2 rows ARE THE
+  // PARENT of a known child, and inherit that child's aliased Child* columns.
+  | match(
+      table=child_processes,
+      field=TargetProcessId,                       // L2-side: parent's own UPID
+      column=ParentProcessId                       // L1-side: child's parent reference (the join column from the table)
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Enrichment for the parent (L2) side. PR2 helpers run here so the parent
+  // record carries decoded MachO/CodeSigning values without polluting the L1
+  // table (which already ran its own copy before the coalesce).
+  | $monolith_convert_time_utc()                   // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()              // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_extension()             // Parses parent's FileName into FileExtension
+  | $monolith_convert_uid()                        // Adds UID_readable sibling for the parent
+  | $monolith_convert_gid()                        // Adds GID_readable sibling for the parent
+  | $monolith_mac_decode_processrollup2()          // Decodes parent's MachOSubType and CodeSigningFlags
+
+  // ▰▰▰▰▰▰[ GROUP BY LOGIC ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Collapses joined rows into one row per (host, parent binary, child binary)
+  // tuple with full verbose context for both parent and child.
+  | groupBy(
+      [
+          aid,                 // Falcon agent ID; uniquely identifies the host
+          SHA256HashData,      // Parent binary hash; uniquely identifies the parent image
+          ChildSHA256HashData  // Child binary hash; uniquely identifies the child image
+      ],
+      function=[
+          collect([
+              // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              utc_time,                 // Human-readable UTC event time (parent event)
+              // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ComputerName,             // Endpoint hostname
+              // ▰▰▰[ Parent User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              UserName,                 // OS account owning the parent
+              UID,                      // Parent's effective UID
+              UID_readable,             // Parent's human-readable UID label
+              GID,                      // Parent's effective GID
+              GID_readable,             // Parent's human-readable GID label
+              // ▰▰▰[ Parent Lineage ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              GrandParentBaseFileName,  // Grandparent binary basename (parent's own ParentBaseFileName)
+              ParentBaseFileName,       // Parent binary basename (the actor on this output row)
+              // ▰▰▰[ Parent Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              TargetProcessId,          // Parent's own UPID (the match key from this side)
+              RawProcessId,             // Parent's OS-level PID
+              ContextBaseFileName,      // Parent's actor binary basename (mirrors FileName)
+              // ▰▰▰[ Parent Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              FilePath,                 // Parent's binary directory
+              FileName,                 // Parent's binary basename
+              FileExtension,            // Parent's binary extension (helper-derived)
+              SHA256HashData,           // Parent binary hash
+              OriginalFilename,         // Parent's Info.plist OriginalFilename
+              // ▰▰▰[ Parent Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              CommandLine,              // Parent's command line as exec'd
+              // ▰▰▰[ Parent Code Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              MachOSubType,             // Parent binary type (decoded)
+              CodeSigningFlags,         // Parent signing-flags mask (decoded)
+              ProcessEntitlements,      // Parent's Mach-O entitlements
+              // ▰▰▰[ Child Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ChildProcessId,           // Child's UPID (from L1, aliased from TargetProcessId)
+              ChildRawProcessId,        // Child's OS-level PID
+              ChildUserName,            // OS account owning the child
+              ChildUID,                 // Child's effective UID
+              ChildGID,                 // Child's effective GID
+              // ▰▰▰[ Child Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ChildImageFileName,       // Child's full image path
+              ChildFilePath,            // Child's binary directory
+              ChildFileName,            // Child's binary basename
+              ChildOriginalFilename,    // Child's Info.plist OriginalFilename
+              ChildSHA256HashData,      // Child binary hash
+              // ▰▰▰[ Child Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ChildCommandLine,         // Child's command line as exec'd
+              // ▰▰▰[ Child Code Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ChildMachOSubType,        // Child binary type (decoded)
+              ChildCodeSigningFlags,    // Child signing-flags mask (decoded)
+              ChildProcessEntitlements  // Child's Mach-O entitlements
+          ])
+      ],
+      limit=max
+  )
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Final analyst view: parent process attribution on the left, child process
+  // attribution on the right, in lineage reading order (grandparent -> parent
+  // -> child). Use the Child*SHA256 columns to pivot on suspicious child
+  // binaries; use the parent SHA256 / CommandLine to identify the spawning
+  // process.
+  | table(
+      [
+          // ▰▰▰[ Time + Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                 // Parent event time (UTC)
+          ComputerName,             // Endpoint hostname
+          // ▰▰▰[ Parent Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                 // Parent's user
+          UID,                      // Parent UID
+          UID_readable,             // Parent UID label
+          GID,                      // Parent GID
+          GID_readable,             // Parent GID label
+          GrandParentBaseFileName,  // Grandparent binary basename
+          ParentBaseFileName,       // Parent binary basename
+          TargetProcessId,          // Parent UPID
+          RawProcessId,             // Parent PID
+          // ▰▰▰[ Parent Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          FilePath,                 // Parent binary directory
+          FileName,                 // Parent binary basename
+          FileExtension,            // Parent extension
+          SHA256HashData,           // Parent binary hash
+          OriginalFilename,         // Parent's signed-binary OriginalFilename
+          CommandLine,              // Parent command line
+          MachOSubType,             // Parent MachO subtype (decoded)
+          CodeSigningFlags,         // Parent signing flags (decoded mask)
+          ProcessEntitlements,      // Parent entitlements
+          // ▰▰▰[ Child Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ChildUserName,            // Child's user
+          ChildUID,                 // Child UID
+          ChildGID,                 // Child GID
+          ChildProcessId,           // Child UPID
+          ChildRawProcessId,        // Child PID
+          // ▰▰▰[ Child Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ChildFilePath,            // Child binary directory
+          ChildFileName,            // Child binary basename
+          ChildSHA256HashData,      // Child binary hash
+          ChildOriginalFilename,    // Child's signed-binary OriginalFilename
+          ChildCommandLine,         // Child command line
+          ChildMachOSubType,        // Child MachO subtype (decoded)
+          ChildCodeSigningFlags,    // Child signing flags (decoded mask)
+          ChildProcessEntitlements  // Child entitlements
+      ],
+      limit=max
+  )

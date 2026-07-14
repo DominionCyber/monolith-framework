@@ -1,0 +1,56 @@
+name: monolith_mac_base_newexecutablewritten
+description: Base query for NewExecutableWritten events. Decodes new-executable file-write metadata.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- newexecutablewritten
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=NewExecutableWritten event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                  // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()             // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_size()                 // Computes CommonSize: byte size in human-readable form (TB/GB/MB/KB)
+  | $monolith_mac_decode_newexecutablewritten()   // Decodes VnodeModificationType (26 values: CREATE, RENAME_TO, CLONE, ...)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,               // Human-readable UTC event time (from helper)
+          ContextTimeStamp,       // Raw event time on host (epoch + ms); no readable conversion yet
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,           // Endpoint hostname
+          aid,                    // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,       // UPID of the writing process; joins to ProcessRollup2
+          ContextThreadId,        // Thread ID within the writing process
+          ContextBaseFileName,    // Basename of the writing process binary (e.g. installd)
+          TreeId,                 // Process tree ID; groups related events
+          // ▰▰▰[ File Details ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,         // Full path of the executable file written
+          FilePath,               // Directory portion of TargetFileName (parser-derived)
+          FileName,               // Basename portion of TargetFileName (parser-derived)
+          Size,                   // File size in bytes
+          CommonSize,             // File size, human-readable (from convert_file_size helper)
+          VnodeModificationType,  // How the file was modified (decoded: CREATE, RENAME_TO, CLONE, TRUNCATE, WRITE, ...)
+          SHA256HashData,         // SHA-256 of the file
+          // ▰▰▰[ Rate Limiting ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          BoundingLimitCount,     // Sensor-observed count when throttling kicked in (41/2203 in this sample, value=50)
+          BoundingLimitDuration   // Throttling window in ms (e.g. 3600000 = 1 hour)
+      ],
+      limit=max
+  )

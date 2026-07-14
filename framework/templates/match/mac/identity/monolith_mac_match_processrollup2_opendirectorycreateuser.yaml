@@ -1,0 +1,89 @@
+name: monolith_mac_match_processrollup2_opendirectorycreateuser
+description: Joins ProcessRollup2 events with OpenDirectoryCreateUser events to enrich with parent process context.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- match
+- processrollup2
+- opendirectorycreateuser
+- syntheticprocessrollup2
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ L1 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  defineTable(
+      query={
+        #event_simpleName=/ProcessRollup2/ event_platform=Mac
+        | $monolith_mac_decode_processrollup2()
+      },
+      name=processes,
+      include=[
+          TargetProcessId,
+          ComputerName,
+          UserName,
+          GrandParentBaseFileName,
+          ParentBaseFileName,
+          FilePath,
+          FileName,
+          ContextBaseFileName,
+          CommandLine,
+          SHA256HashData,
+          OriginalFilename,
+          RawProcessId
+      ]
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | #event_simpleName=OpenDirectoryCreateUser event_platform=Mac
+  | $monolith_utility_falcon_pid()
+
+  // ▰▰▰▰▰▰[ MATCH STATEMENT ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | match(
+      table=processes,
+      field=falconPID,
+      column=TargetProcessId
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()
+  | $monolith_utility_falcon_helper()
+  | $monolith_mac_decode_opendirectorycreateuser()
+
+  // ▰▰▰▰▰▰[ GROUP BY LOGIC ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | groupBy(
+      [aid, SHA256HashData, UserNames],
+      function=[
+          collect([
+              utc_time,
+              ComputerName,
+              UserName,
+              GrandParentBaseFileName,
+              ParentBaseFileName,
+              FilePath,
+              FileName,
+              ContextBaseFileName,
+              CommandLine,
+              SHA256HashData,
+              OriginalFilename,
+              RawProcessId,
+              ODNodeName,
+              ODErrorCode,
+              UserNames,
+              AuthenticationUuidsAsStrings,
+              ODDatabasePath
+          ])
+      ],
+      limit=max
+  )
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table([utc_time,ComputerName,UserName,GrandParentBaseFileName,ParentBaseFileName,FilePath,FileName,ContextBaseFileName,CommandLine,SHA256HashData,OriginalFilename,RawProcessId,ODNodeName,ODErrorCode,UserNames,AuthenticationUuidsAsStrings,ODDatabasePath])

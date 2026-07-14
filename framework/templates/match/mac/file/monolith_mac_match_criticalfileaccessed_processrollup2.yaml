@@ -1,0 +1,167 @@
+name: monolith_mac_match_criticalfileaccessed_processrollup2
+description: Joins ProcessRollup2 events with CriticalFileAccessed events, surfacing reads of sensitive files (Keychain, .ssh, browser cookies, etc.) enriched with the responsible process context.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- match
+- criticalfileaccessed
+- processrollup2
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ L1 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Builds a lookup table of CriticalFileAccessed events on Mac, keyed by falconPID (the process that performed the event)
+  defineTable(
+      query={
+        #event_simpleName=CriticalFileAccessed event_platform=Mac
+        | $monolith_utility_falcon_pid()        // Translates ContextProcessId into falconPID (the match key for non-PR2 events)
+      },
+      name=critical_accesses,
+      include=[
+          // ▰▰▰[ Match Key ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          falconPID,         // Derived from ContextProcessId by the falcon_pid helper; joins to PR2.TargetProcessId
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextTimeStamp,  // Raw event time on host
+          // ▰▰▰[ Accessed File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,    // Full path of the accessed file
+          FileIdentifier,    // Sensor-side file identifier
+          USN,               // Update Sequence Number (filesystem change marker)
+          // ▰▰▰[ File Permissions ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UnixMode,          // Raw POSIX mode bits
+          UnixMode_octal,    // Octal POSIX mode (decoded)
+          OwnerPerms,        // Owner permissions (decoded)
+          GroupPerms,        // Group permissions (decoded)
+          OtherPerms,        // Other permissions (decoded)
+          // ▰▰▰[ Tree ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TreeId             // Process tree ID
+      ]
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Pulls ProcessRollup2 events to be enriched with event context from L1 (exact match anchor; excludes SyntheticPR2 and PR2Stats)
+  | #event_simpleName=ProcessRollup2 event_platform=Mac
+
+  // ▰▰▰▰▰▰[ MATCH STATEMENT ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Inner join: keep only PR2 events whose TargetProcessId matches a falconPID in the critical_accesses table
+  | match(
+      table=critical_accesses,
+      field=TargetProcessId,                  // PR2-side UPID (the process the event describes)
+      column=falconPID                        // L1-side UPID (derived from ContextProcessId by helper on the event side)
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Enrichment for the L2 ProcessRollup2 side (applied after the match so event fields are also in scope)
+  | $monolith_convert_time_utc()              // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()         // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_extension()        // Parses FileName into FileExtension; "(none)" if absent
+  | $monolith_convert_uid()                   // Adds UID_readable sibling (root, daemon, ...)
+  | $monolith_convert_gid()                   // Adds GID_readable sibling
+  | $monolith_mac_decode_processrollup2()     // Decodes MachOSubType, CodeSigningFlags (PR2-specific enum/bitmask)
+
+  // ▰▰▰▰▰▰[ GROUP BY LOGIC ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Collapses many joined rows into one row per (host, process binary, TargetFileName) tuple with full collected context
+  | groupBy(
+      [
+          aid,             // Falcon agent ID; uniquely identifies the host
+          SHA256HashData,  // PR2 binary hash; uniquely identifies the executing image
+          TargetFileName   // Event pivot; one row per unique value per binary per host
+      ],
+      function=[
+          collect([
+              // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              utc_time,             // Human-readable UTC event time (from helper)
+              // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ComputerName,         // Endpoint hostname (from L2)
+              // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              UserName,             // OS account owning the actor process (from L2)
+              UID,                  // Effective UID (from L2)
+              UID_readable,         // Human-readable UID (from L1 helper)
+              GID,                  // Effective GID (from L2)
+              GID_readable,         // Human-readable GID (from L1 helper)
+              // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              TargetProcessId,      // UPID of the actor process (from L2)
+              RawProcessId,         // OS-level PID (from L2)
+              ParentBaseFileName,   // Basename of the parent binary (from L2)
+              ContextBaseFileName,  // Basename of the actor process binary (from L2)
+              // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              FilePath,             // Directory of the actor process binary (from L2)
+              FileName,             // Basename of the actor process binary (from L2)
+              FileExtension,        // Extension of the actor process binary (from L2)
+              SHA256HashData,       // SHA-256 of the actor process binary (from L2)
+              // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              CommandLine,          // Full command line of the actor process (from L2)
+              // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ContextTimeStamp,     // Raw event time on host
+              // ▰▰▰[ Accessed File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              TargetFileName,       // Full path of the accessed file
+              FileIdentifier,       // Sensor-side file identifier
+              USN,                  // Update Sequence Number (filesystem change marker)
+              // ▰▰▰[ File Permissions ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              UID,                  // File owner UID (from L2; the file's owner, not the actor)
+              GID,                  // File group GID (from L1)
+              UnixMode,             // Raw POSIX mode bits
+              UnixMode_octal,       // Octal POSIX mode (decoded)
+              OwnerPerms,           // Owner permissions (decoded)
+              GroupPerms,           // Group permissions (decoded)
+              OtherPerms,           // Other permissions (decoded)
+              // ▰▰▰[ Tree ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              TreeId                // Process tree ID
+          ])
+      ],
+      limit=max
+  )
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Final analyst view: one row per group key with collected context arranged for triage
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,             // Human-readable UTC event time (from helper)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,         // Endpoint hostname (from L2)
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,             // OS account owning the actor process (from L2)
+          UID,                  // Effective UID (from L2)
+          UID_readable,         // Human-readable UID (from L1 helper)
+          GID,                  // Effective GID (from L2)
+          GID_readable,         // Human-readable GID (from L1 helper)
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetProcessId,      // UPID of the actor process (from L2)
+          RawProcessId,         // OS-level PID (from L2)
+          ParentBaseFileName,   // Basename of the parent binary (from L2)
+          ContextBaseFileName,  // Basename of the actor process binary (from L2)
+          // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          FilePath,             // Directory of the actor process binary (from L2)
+          FileName,             // Basename of the actor process binary (from L2)
+          FileExtension,        // Extension of the actor process binary (from L2)
+          SHA256HashData,       // SHA-256 of the actor process binary (from L2)
+          // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          CommandLine,          // Full command line of the actor process (from L2)
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextTimeStamp,     // Raw event time on host
+          // ▰▰▰[ Accessed File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,       // Full path of the accessed file
+          FileIdentifier,       // Sensor-side file identifier
+          USN,                  // Update Sequence Number (filesystem change marker)
+          // ▰▰▰[ File Permissions ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UID,                  // File owner UID (from L2; the file's owner, not the actor)
+          GID,                  // File group GID (from L1)
+          UnixMode,             // Raw POSIX mode bits
+          UnixMode_octal,       // Octal POSIX mode (decoded)
+          OwnerPerms,           // Owner permissions (decoded)
+          GroupPerms,           // Group permissions (decoded)
+          OtherPerms,           // Other permissions (decoded)
+          // ▰▰▰[ Tree ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TreeId                // Process tree ID
+      ],
+      limit=max
+  )

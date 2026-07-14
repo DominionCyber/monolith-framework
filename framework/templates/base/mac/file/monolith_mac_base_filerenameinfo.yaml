@@ -1,0 +1,55 @@
+name: monolith_mac_base_filerenameinfo
+description: 'Base query for FileRenameInfo events on Mac. Surfaces file-rename telemetry attributed to the responsible process. 8-field schema with no decoder needed; user attribution and the binary doing the rename come from joining ContextProcessId to ProcessRollup2.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- filerenameinfo
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=FileRenameInfo event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()           // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()      // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_extension()     // Parses FileName (target-side) into FileExtension; "(none)" if absent
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,              // Human-readable UTC event time (from helper)
+          ContextTimeStamp,      // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,          // Endpoint hostname
+          aid,                   // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,      // UPID of the renaming process; joins to ProcessRollup2 for user attribution
+          ContextThreadId,       // UTID of the renaming thread; commonly 0 (sentinel) for kernel-level renames
+          TreeId,                // Process tree ID; groups related events
+          // ▰▰▰[ Rename Operation ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          SourceFileName,        // Original path BEFORE rename (often .tmp/.part/.staging name in atomic-write patterns)
+          TargetFileName,        // New path AFTER rename (the final operational name)
+          FilePath,              // Directory portion of TargetFileName (parser-derived; reflects post-rename state)
+          FileName,              // Basename of TargetFileName (parser-derived; reflects post-rename state)
+          FileExtension,         // Last extension of FileName (from helper); "(none)" if absent
+          // ▰▰▰[ Container / Cluster ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          OciContainerId,        // Container ID if rename occurred inside a container (sparse on Mac unless Docker/Podman running)
+          PodId,                 // Kubernetes pod ID (sparse on Mac unless k8s tooling running)
+          // ▰▰▰[ Rate Limiting ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          BoundingLimitCount,    // Sensor-observed count when throttling kicked in (sparse: ~0.7% of events)
+          BoundingLimitDuration  // Throttling window in ms (e.g. 3600000 = 1 hour)
+      ],
+      limit=max
+  )

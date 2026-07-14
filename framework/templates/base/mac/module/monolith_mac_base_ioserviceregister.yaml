@@ -1,0 +1,43 @@
+name: monolith_mac_base_ioserviceregister
+description: Base query for IOServiceRegister events. Decode transform pending; raw IOKit service-registration metadata surfaced.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- ioserviceregister
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=IOServiceRegister event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()       // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()  // Decodes Falcon numeric enums/bitfields into readable strings
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,             // Human-readable UTC event time (from helper)
+          ContextTimeStamp,     // Raw event time on host (epoch + ms); no readable conversion yet
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,         // Endpoint hostname
+          aid,                  // Falcon agent ID; primary host key
+          // ▰▰▰[ IO Service ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          IOServiceName,        // Human-readable device name (e.g. iPhone, USB Drive, Apple Internal Keyboard)
+          IOServiceClass,       // IOKit class chain (e.g. IOUSBHostDevice:IOUSBDevice:IOService:IORegistryEntry:OSObject)
+          IOServicePath,        // IORegistry path (e.g. IOService:/AppleACPIPlatformExpert/PCI0@0/AppleACPIPCI/XHC1@14/...)
+          IOServiceProperties   // Free-form property bag (often blank; carries device-specific metadata when populated)
+      ],
+      limit=max
+  )

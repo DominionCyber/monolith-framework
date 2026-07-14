@@ -1,0 +1,61 @@
+name: monolith_mac_base_useridentity
+description: Base query for UserIdentity events. Decodes user-identity metadata for macOS sessions.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- useridentity
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=UserIdentity event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()              // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()         // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_uid()                   // Adds UID_readable sibling (root, daemon, ...)
+  | $monolith_mac_decode_useridentity()       // Decodes UserLogonFlags (6-bit mask) and UserGroupsBitmask (30-bit mask)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                    // Human-readable UTC event time (from helper)
+          PasswordLastSet,             // Epoch timestamp when the account's password was last changed (sparse; ~2% in this sample)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                // Endpoint hostname
+          aid,                         // Falcon agent ID; primary host key
+          // ▰▰▰[ User Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                    // OS account name (e.g. "root", "_fpsd")
+          UID,                         // POSIX UID; sub-500 typically reserved for system services
+          UID_readable,                // Human-readable UID label (from convert_uid helper)
+          UserPrincipal,               // Fully-qualified user principal (UserName@MachineDomain)
+          UserSid,                     // Security Identifier in Windows-style format
+          UserIsAdmin,                 // 1 if local admin; 0 otherwise (sparse; populated only on initial-login event)
+          // ▰▰▰[ Authentication ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          AuthenticationId,            // LUID-like identifier; sentinels: INVALID(0), NETWORK_SERVICE(996), LOCAL_SERVICE(997), SYSTEM(999), RESERVED(1000)
+          AuthenticationUuid,          // Authentication UUID in raw kernel byte order
+          AuthenticationUuidAsString,  // Same UUID in canonical string format (preferred for analyst pivots)
+          LoginSessionId,              // Numeric session identifier; pivot key across events for the same login
+          LogonDomain,                 // Domain the user authenticated against (empty on local accounts)
+          MachineDomain,               // Domain the machine is joined to (empty on standalone Macs)
+          // ▰▰▰[ Privileges ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserLogonFlags,              // Raw bitmask of logon characteristics
+          UserLogonFlags_mask,         // Decoded logon flag names (from helper: USER_IS_ADMIN, USER_IS_LOCAL, ...)
+          UserGroupsBitmask,           // Raw bitmask of group memberships
+          UserGroupsBitmask_mask,      // Decoded group names (from helper: GROUP_BUILTIN_ADMINISTRATOR, ...)
+          // ▰▰▰[ Sensor Metadata ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ResendToCloud                // 1 if the sensor re-sent this event (deduplication signal)
+      ],
+      limit=max
+  )

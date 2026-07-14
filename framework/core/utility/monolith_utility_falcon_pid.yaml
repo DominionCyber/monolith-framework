@@ -1,0 +1,28 @@
+name: monolith_utility_falcon_pid
+description: 'Builds the synthetic falconPID field used as the join key across base, match, and decoder templates. Coalesces ContextProcessId (most events), RpcClientProcessId (RPC-mediated events), and WritingProcessId (file-write events) so any event can be matched against any other event from the same process.'
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- utility
+- falconpid
+- global
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ UTILITY ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | falconPID := coalesce([ContextProcessId, RpcClientProcessId, WritingProcessId])  // coalesce(): first non-null wins. ContextProcessId is the standard process ID on almost every event; RpcClientProcessId fires on RPC-bridged events; WritingProcessId appears on writer-attributed file events. The resulting falconPID is the universal process-join key.

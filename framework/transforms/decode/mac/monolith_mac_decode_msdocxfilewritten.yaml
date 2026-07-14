@@ -1,0 +1,44 @@
+name: monolith_mac_decode_msdocxfilewritten
+description: 'Decodes FileCategory (11-value enum) and MSOfficeSubType (3-value enum) on MSDocxFileWritten events.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- msdocxfilewritten
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for MSOfficeSubType (3 value branches; final `*` is the fallthrough)
+  | case {
+      MSOfficeSubType = "0" | MSOfficeSubType := "UNKNOWN";
+      MSOfficeSubType = "1" | MSOfficeSubType := "OLECFB";
+      MSOfficeSubType = "2" | MSOfficeSubType := "OOXML";
+      *
+  }
+
+  // case {}: enum decoder for FileCategory (11 value branches; final `*` is the fallthrough)
+  | case {
+      FileCategory = "0"  | FileCategory := "OTHER";
+      FileCategory = "1"  | FileCategory := "ARCHIVES";
+      FileCategory = "2"  | FileCategory := "OFFICE_DOCUMENTS";
+      FileCategory = "3"  | FileCategory := "MULTIMEDIA_FILES";
+      FileCategory = "4"  | FileCategory := "DESIGN_FILES";
+      FileCategory = "5"  | FileCategory := "SOURCE_CODE";
+      FileCategory = "6"  | FileCategory := "EXECUTABLE_FILES";
+      FileCategory = "7"  | FileCategory := "VIRTUAL_MACHINE_FILES";
+      FileCategory = "8"  | FileCategory := "EMAIL_FILES";
+      FileCategory = "9"  | FileCategory := "DATA_AND_LOGS";
+      FileCategory = "10" | FileCategory := "ENCRYPTED";
+      *
+  }

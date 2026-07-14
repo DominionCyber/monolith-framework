@@ -1,0 +1,36 @@
+name: monolith_mac_decode_loginitemadded
+description: Decodes event fields using conditional logic to standardize values across different event sources.
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- loginitemadded
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for LaunchItemType (5 value branches; final `*` is the fallthrough)
+  | case {
+      LaunchItemType = "0" | LaunchItemType := "USER_ITEM";
+      LaunchItemType = "1" | LaunchItemType := "APP";
+      LaunchItemType = "2" | LaunchItemType := "LOGIN_ITEM";
+      LaunchItemType = "3" | LaunchItemType := "AGENT";
+      LaunchItemType = "4" | LaunchItemType := "DAEMON";
+      *
+  }

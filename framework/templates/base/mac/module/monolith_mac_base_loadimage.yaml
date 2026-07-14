@@ -1,0 +1,50 @@
+name: monolith_mac_base_loadimage
+description: 'Base query for LoadImage events. Decodes user-mode image-load metadata (binaries, dylibs, frameworks) with process context and hash. NO SAMPLE DATA available at build time.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- loadimage
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=LoadImage event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()      // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper() // Decodes Falcon numeric enums/bitfields into readable strings
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,         // Human-readable UTC event time (from helper)
+          ContextTimeStamp, // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName, // Endpoint hostname
+          aid,          // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,    // UPID of the loading process; joins to ProcessRollup2
+          ContextThreadId,     // Thread within the loading process
+          ContextBaseFileName, // Basename of the loading process binary
+          TreeId,              // Process tree ID
+          // ▰▰▰[ Loaded Image ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,  // Full path of the loaded image (binary/dylib/framework)
+          FilePath,        // Directory portion (parser-derived)
+          FileName,        // Basename (parser-derived)
+          FileIdentifier,  // Unique file ID for cross-event correlation
+          SHA256HashData,  // SHA-256 of the loaded image (sentinel values NOT decoded per framework rule)
+          ImageBaseAddress // Memory address where the image was loaded
+      ],
+      limit=max
+  )

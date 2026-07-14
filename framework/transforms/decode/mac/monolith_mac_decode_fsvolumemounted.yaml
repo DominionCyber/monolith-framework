@@ -1,0 +1,39 @@
+name: monolith_mac_decode_fsvolumemounted
+description: 'Decodes VolumeIsNetwork (2-value enum) and VolumeMediaRemovable (2-value enum) on FsVolumeMounted events. Both fields are booleans with 0=No / 1=Yes semantics; not documented enums in the Falcon dictionary but consistent with sensor behavior.'
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- fsvolumemounted
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for VolumeIsNetwork (2 value branches; final `*` is the fallthrough)
+  | case {
+      VolumeIsNetwork = "0" | VolumeIsNetwork := "No";
+      VolumeIsNetwork = "1" | VolumeIsNetwork := "Yes";
+      *
+  }
+  // case {}: enum decoder for VolumeMediaRemovable (2 value branches; final `*` is the fallthrough)
+  | case {
+      VolumeMediaRemovable = "0" | VolumeMediaRemovable := "No";
+      VolumeMediaRemovable = "1" | VolumeMediaRemovable := "Yes";
+      *
+  }

@@ -1,0 +1,75 @@
+name: monolith_mac_decode_processrollup2
+description: Decodes event fields using conditional logic to standardize values across different event sources.
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- processrollup2
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for MachOSubType (8 value branches; final `*` is the fallthrough)
+  | case {
+      MachOSubType = "0" | MachOSubType := "UNKNOWN";
+      MachOSubType = "1" | MachOSubType := "EXECUTABLE64";
+      MachOSubType = "2" | MachOSubType := "DYLIB64";
+      MachOSubType = "3" | MachOSubType := "BUNDLE64";
+      MachOSubType = "4" | MachOSubType := "KEXT64";
+      MachOSubType = "5" | MachOSubType := "EXECUTABLE32";
+      MachOSubType = "6" | MachOSubType := "DYLIB32";
+      MachOSubType = "7" | MachOSubType := "BUNDLE32";
+      *
+  }
+
+  // bitfield:extractFlagsAsString(): expands CodeSigningFlags (27 flags) into the new field CodeSigningFlags_mask
+  | bitfield:extractFlagsAsString(
+      field="CodeSigningFlags",
+      flagNames=[
+          [0,  "CS_VALID"],
+          [1,  "CS_ADHOC"],
+          [2,  "CS_GET_TASK_ALLOW"],
+          [3,  "CS_INSTALLER"],
+          [4,  "CS_FORCED_LV"],
+          [5,  "CS_INVALID_ALLOWED"],
+          [8,  "CS_HARD"],
+          [9,  "CS_KILL"],
+          [10, "CS_CHECK_EXPIRATION"],
+          [11, "CS_RESTRICT"],
+          [12, "CS_ENFORCEMENT"],
+          [13, "CS_REQUIRE_LV"],
+          [14, "CS_ENTITLEMENTS_VALIDATED"],
+          [15, "CS_NVRAM_UNRESTRICTED"],
+          [16, "CS_RUNTIME"],
+          [20, "CS_EXEC_SET_HARD"],
+          [21, "CS_EXEC_SET_KILL"],
+          [22, "CS_EXEC_SET_ENFORCEMENT"],
+          [23, "CS_EXEC_INHERIT_SIP"],
+          [24, "CS_KILLED"],
+          [25, "CS_DYLD_PLATFORM"],
+          [26, "CS_PLATFORM_BINARY"],
+          [27, "CS_PLATFORM_PATH"],
+          [28, "CS_DEBUGGED"],
+          [29, "CS_SIGNED"],
+          [30, "CS_DEV_CODE"],
+          [31, "CS_DATAVAULT_CONTROLLER"]
+      ],
+      as="CodeSigningFlags_mask",
+      separator=", "
+  )

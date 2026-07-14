@@ -1,0 +1,77 @@
+name: monolith_mac_base_dcusbdeviceconnected
+description: 'Base query for DcUsbDeviceConnected events. Decodes USB device-connection metadata including hardware identity, USB class, hub topology, and device-control policy disposition.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- dcusbdeviceconnected
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=DcUsbDeviceConnected event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()           // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_dcusbdeviceconnected() // Decodes DeviceConnectionStatus (10 vals), DcPolicyAction (3 vals), DcPolicyFlags (bitmask, 8 flags -> DcPolicyFlags_mask), DcPolicyMassStorageBlockPermissions (4 vals) in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,         // Human-readable UTC event time (from helper)
+          ContextTimeStamp, // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName, // Endpoint hostname
+          aid,          // Falcon agent ID; primary host key
+          // ▰▰▰[ Event Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DeviceTimeStamp,        // Device-reported connection time (may differ from event timestamp by milliseconds)
+          DeviceConnectionStatus, // Connection state (decoded; 10 values: CONNECTED, REJECTED, AUTHORIZED, ...)
+          // ▰▰▰[ Device Identity (Hardware) ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DeviceVendorId,          // USB Vendor ID (VID); 4-hex e.g. 0x05ac (Apple) - device identifier
+          DeviceProductId,         // USB Product ID (PID); 4-hex - identifies specific device model
+          DeviceManufacturer,      // Manufacturer string from device descriptor
+          DeviceProduct,           // Product name string from device descriptor
+          DeviceVersion,           // Device version/revision
+          DeviceSerialNumber,      // Device serial number (per-unit identifier, when reported)
+          DeviceInstanceId,        // OS-assigned device instance ID for this connection
+          DeviceDescriptorSetHash, // Hash of full device descriptor set (full fingerprint)
+          // ▰▰▰[ USB Class ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DeviceUsbClass,                  // USB class code (0x03=HID, 0x08=MassStorage, 0x09=Hub, etc.)
+          DeviceUsbSubclass,               // USB subclass code
+          DeviceProtocol,                  // USB protocol code
+          DeviceUsbVersion,                // USB spec version (e.g. 2.00, 3.20)
+          DeviceActiveConfigurationNumber, // Active configuration index from device descriptor
+          // ▰▰▰[ Device Properties ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DevicePropertyDeviceDescription,   // Human-readable device description
+          DevicePropertyFriendlyName,        // Friendly name as exposed by macOS IOKit
+          DevicePropertyManufacturer,        // IOKit manufacturer property
+          DevicePropertyClassGuid,           // Device class GUID (usually null on Mac; Windows-derived field)
+          DevicePropertyClassName,           // Device class name (usually null on Mac)
+          DevicePropertyLocationInformation, // Location info (usually null on Mac)
+          // ▰▰▰[ Topology ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ParentHubInstanceId, // Parent USB hub instance ID (for chain tracking)
+          ParentHubPort,       // Port number on the parent hub
+          // ▰▰▰[ Policy Disposition ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DcPolicyId,                          // Device-control policy ID that matched
+          DcPolicyGroupId,                     // Policy group ID for grouping related policies
+          DcPolicyAction,                      // Policy action taken (decoded; 3 vals: NONE, MONITOR, BLOCK)
+          DcPolicyFlags,                       // Policy flags bitmask (decoded; 8 flags)
+          DcPolicyFlags_mask,                  // Human-readable policy flag list from bitfield helper
+          DcPolicyMassStorageBlockPermissions, // Per-MS-block permissions (decoded; 4 values)
+          // ▰▰▰[ User Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DeviceUserAuthenticationId, // Auth session ID of the user at insertion time
+          DeviceUserSid               // User SID (macOS sentinel; rarely meaningful)
+      ],
+      limit=max
+  )

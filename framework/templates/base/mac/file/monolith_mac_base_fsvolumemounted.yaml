@@ -1,0 +1,53 @@
+name: monolith_mac_base_fsvolumemounted
+description: 'Base query for FsVolumeMounted events on Mac. Surfaces volume-mount telemetry with process attribution and decoded boolean labels. Useful for tracking volume lifecycle, .dmg attach tracking, and removable-media inventory.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- fsvolumemounted
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=FsVolumeMounted event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()             // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()        // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_fsvolumemounted()      // Decodes VolumeIsNetwork and VolumeMediaRemovable
+  | $monolith_mac_decode_fsvolumeunmounted() // Decodes VolumeIsNetwork and VolumeMediaRemovable booleans (0/1 → No/Yes) in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,              // Human-readable UTC event time (from helper)
+          ContextTimeStamp,      // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,          // Endpoint hostname
+          aid,                   // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,      // UPID of the unmounting process; joins to ProcessRollup2 (sparse: ~99.98% populated)
+          ContextThreadId,       // UTID of the unmounting thread; commonly 0 (sentinel) for kernel-level unmounts
+          TreeId,                // Process tree ID; groups related events
+          // ▰▰▰[ Unmounted Volume ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          VolumeName,            // Friendly volume name (e.g. "Macintosh HD", "USB Drive")
+          VolumeMountPoint,      // Where the volume had been mounted (e.g. "/Volumes/USB Drive", "/System/Volumes/Update/mnt1")
+          VolumeOriginPath,      // Source path the volume came from (sparse, ~3%; populated for .dmg-backed or network mounts)
+          VolumeSessionUUID,     // Per-mount session UUID; joins to the prior FsVolumeMounted event for the same mount
+          // ▰▰▰[ Volume Device ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          VolumeMediaBSDName,    // BSD device name (e.g. "disk3s3", "disk5"); the kernel-level device identifier
+          VolumeMediaRemovable,  // Removable-media flag (decoded: No = internal, Yes = external/USB)
+          VolumeIsNetwork        // Network-share flag (decoded: No = local, Yes = SMB/AFP/NFS-mounted)
+      ],
+      limit=max
+  )

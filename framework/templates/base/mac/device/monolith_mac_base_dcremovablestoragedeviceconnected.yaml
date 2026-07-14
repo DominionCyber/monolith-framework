@@ -1,0 +1,60 @@
+name: monolith_mac_base_dcremovablestoragedeviceconnected
+description: 'Base query for DcRemovableStorageDeviceConnected events on Mac. Decodes removable storage device-connection metadata including hardware identity, bus type, Thunderbolt UID, and device-control policy disposition.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- dcremovablestoragedeviceconnected
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=DcRemovableStorageDeviceConnected event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                             // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()                        // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_dcremovablestoragedeviceconnected() // Decodes DcRemovableStorageType, DcPolicyAction, DcPolicyFlags, DcPolicyMassStorageBlockPermissions, DcBusType in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                            // Human-readable UTC event time (from helper)
+          DeviceTimeStamp,                     // Device-reported connection time (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                        // Endpoint hostname
+          aid,                                 // Falcon agent ID; primary host key
+          // ▰▰▰[ Storage Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DeviceManufacturer,                  // Manufacturer string from device descriptor
+          DeviceProduct,                       // Product/model string from device descriptor
+          DeviceProductIdStr,                  // Human-readable product description string
+          DeviceVendorId,                      // USB/PCI Vendor ID (numeric)
+          DeviceProductId,                     // Product ID (numeric)
+          DeviceSerialNumber,                  // Device serial number (per-unit identifier)
+          DeviceInstanceId,                    // OS-assigned device instance ID for this connection
+          DcRemovableStorageType,              // Storage type (decoded; 3 values: UNKNOWN, FIXED, REMOVABLE)
+          DcBusType,                           // Connection bus (decoded; 6 values: USB, FIREWIRE, THUNDERBOLT, SD, SATA, OTHER)
+          ThunderboltUID,                      // Thunderbolt unique identifier (0 if not a Thunderbolt device)
+          // ▰▰▰[ Policy Disposition ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DcPolicyId,                          // Device-control policy ID that matched
+          DcPolicyGroupId,                     // Policy group ID for grouping related policies
+          DcPolicyAction,                      // Policy action (decoded; 3 values: NONE, MONITOR, BLOCK)
+          DcPolicyFlags,                       // Policy flags bitmask (decoded; 8 flags)
+          DcPolicyFlags_mask,                  // Human-readable policy flag list from bitfield helper
+          DcPolicyMassStorageBlockPermissions, // MS block permissions (decoded; 4 values)
+          // ▰▰▰[ User Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DeviceUserAuthenticationId,          // Auth session ID of the user at insertion time
+          DeviceUserSid                       // User SID associated with the insertion (Windows-style format on Mac as well)
+      ],
+      limit=max
+  )

@@ -1,0 +1,57 @@
+name: monolith_mac_decode_newexecutablewritten
+description: Decodes event fields using conditional logic to standardize values across different event sources.
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- newexecutablewritten
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for VnodeModificationType (26 value branches; final `*` is the fallthrough)
+  | case {
+      VnodeModificationType = "0"  | VnodeModificationType := "CREATE";
+      VnodeModificationType = "1"  | VnodeModificationType := "LINK";
+      VnodeModificationType = "2"  | VnodeModificationType := "OPEN";
+      VnodeModificationType = "3"  | VnodeModificationType := "RENAME_FROM";
+      VnodeModificationType = "4"  | VnodeModificationType := "RENAME_TO";
+      VnodeModificationType = "5"  | VnodeModificationType := "TRUNCATE";
+      VnodeModificationType = "6"  | VnodeModificationType := "UNLINK";
+      VnodeModificationType = "7"  | VnodeModificationType := "WRITE";
+      VnodeModificationType = "8"  | VnodeModificationType := "SET_FLAGS";
+      VnodeModificationType = "9"  | VnodeModificationType := "SET_MODE";
+      VnodeModificationType = "10" | VnodeModificationType := "CLOSE";
+      VnodeModificationType = "11" | VnodeModificationType := "EXECUTE";
+      VnodeModificationType = "12" | VnodeModificationType := "DUP";
+      VnodeModificationType = "13" | VnodeModificationType := "FCNTL";
+      VnodeModificationType = "14" | VnodeModificationType := "MMAP";
+      VnodeModificationType = "15" | VnodeModificationType := "DELETE_EXT_ATTR";
+      VnodeModificationType = "16" | VnodeModificationType := "SET_EXT_ATTR";
+      VnodeModificationType = "17" | VnodeModificationType := "CLONE";
+      VnodeModificationType = "18" | VnodeModificationType := "SET_ACL";
+      VnodeModificationType = "19" | VnodeModificationType := "UTIMES";
+      VnodeModificationType = "20" | VnodeModificationType := "EXCHANGE_DATA";
+      VnodeModificationType = "21" | VnodeModificationType := "COPYFILE";
+      VnodeModificationType = "22" | VnodeModificationType := "SET_ATTR_LIST";
+      VnodeModificationType = "23" | VnodeModificationType := "SET_OWNER";
+      VnodeModificationType = "24" | VnodeModificationType := "GET_ATTR_LIST";
+      VnodeModificationType = "25" | VnodeModificationType := "FS_GET_PATH";
+      *
+  }

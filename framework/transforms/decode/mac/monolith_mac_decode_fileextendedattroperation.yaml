@@ -1,0 +1,67 @@
+name: monolith_mac_decode_fileextendedattroperation
+description: Decodes event fields using conditional logic to standardize values across different event sources.
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- fileextendedattroperation
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for ExtendedAttributeModificationType (2 value branches; final `*` is the fallthrough)
+  | case {
+      ExtendedAttributeModificationType = "15" | ExtendedAttributeModificationType := "DELETE";
+      ExtendedAttributeModificationType = "16" | ExtendedAttributeModificationType := "SET";
+      *
+  }
+
+  // case {}: enum decoder for ExtendedAttributeStatus (13 value branches; final `*` is the fallthrough)
+  | case {
+      ExtendedAttributeStatus = "0"    | ExtendedAttributeStatus := "NO_ERR";
+      ExtendedAttributeStatus = "1"    | ExtendedAttributeStatus := "EPERM";
+      ExtendedAttributeStatus = "5"    | ExtendedAttributeStatus := "EIO";
+      ExtendedAttributeStatus = "13"   | ExtendedAttributeStatus := "EACCES";
+      ExtendedAttributeStatus = "20"   | ExtendedAttributeStatus := "ENOTDIR";
+      ExtendedAttributeStatus = "21"   | ExtendedAttributeStatus := "EISDIR";
+      ExtendedAttributeStatus = "34"   | ExtendedAttributeStatus := "ERANGE";
+      ExtendedAttributeStatus = "45"   | ExtendedAttributeStatus := "ENOTSUP";
+      ExtendedAttributeStatus = "62"   | ExtendedAttributeStatus := "ELOOP";
+      ExtendedAttributeStatus = "63"   | ExtendedAttributeStatus := "ENAMETOOLONG";
+      ExtendedAttributeStatus = "93"   | ExtendedAttributeStatus := "ENOATTR";
+      ExtendedAttributeStatus = "1000" | ExtendedAttributeStatus := "OTHER_ERR";
+      ExtendedAttributeStatus = "1001" | ExtendedAttributeStatus := "PARSE_ERR";
+      *
+  }
+
+  // case {}: enum decoder for VnodeType (11 value branches; final `*` is the fallthrough)
+  | case {
+      VnodeType = "0"  | VnodeType := "VNON";
+      VnodeType = "1"  | VnodeType := "VREG";
+      VnodeType = "2"  | VnodeType := "VDIR";
+      VnodeType = "3"  | VnodeType := "VBLK";
+      VnodeType = "4"  | VnodeType := "VCHR";
+      VnodeType = "5"  | VnodeType := "VLNK";
+      VnodeType = "6"  | VnodeType := "VSOCK";
+      VnodeType = "7"  | VnodeType := "VFIFO";
+      VnodeType = "8"  | VnodeType := "VBAD";
+      VnodeType = "9"  | VnodeType := "VSTR";
+      VnodeType = "10" | VnodeType := "VCPLX";
+      *
+  }

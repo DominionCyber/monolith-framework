@@ -1,0 +1,46 @@
+name: monolith_mac_decode_tlsclienthello
+description: 'Decodes TlsVersion (4-value enum), ConnectionDirection (5-value enum), and TrafficDirection (2-value enum) on TlsClientHello events.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- tlsclienthello
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for ConnectionDirection (5 value branches; final `*` is the fallthrough)
+  | case {
+      ConnectionDirection = "0" | ConnectionDirection := "OUTBOUND";
+      ConnectionDirection = "1" | ConnectionDirection := "INBOUND";
+      ConnectionDirection = "2" | ConnectionDirection := "NEITHER";
+      ConnectionDirection = "3" | ConnectionDirection := "BOTH";
+      ConnectionDirection = "4" | ConnectionDirection := "UNKNOWN";
+      *
+  }
+
+  // case {}: enum decoder for TrafficDirection (2 value branches; final `*` is the fallthrough)
+  | case {
+      TrafficDirection = "1" | TrafficDirection := "INGRESS";
+      TrafficDirection = "2" | TrafficDirection := "EGRESS";
+      *
+  }
+
+  // case {}: enum decoder for TlsVersion (4 value branches; final `*` is the fallthrough)
+  | case {
+      TlsVersion = "0" | TlsVersion := "TLS_1_0";
+      TlsVersion = "1" | TlsVersion := "TLS_1_1";
+      TlsVersion = "2" | TlsVersion := "TLS_1_2";
+      TlsVersion = "3" | TlsVersion := "TLS_1_3";
+      *
+  }

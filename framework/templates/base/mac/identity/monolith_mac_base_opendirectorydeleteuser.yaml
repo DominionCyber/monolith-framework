@@ -1,0 +1,48 @@
+name: monolith_mac_base_opendirectorydeleteuser
+description: 'Base query for OpenDirectoryDeleteUser events on Mac. Surfaces macOS OpenDirectory user-record deletion telemetry with decoded ODErrorCode. Rare event; legitimate sources include offboarding workflows and lifecycle scripts.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- opendirectorydeleteuser
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=OpenDirectoryDeleteUser event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                     // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()                // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_opendirectorydeleteuser()   // Decodes ODErrorCode (63 values: SUCCESS, RECORD_PERMISSION_ERROR, CREDENTIALS_INVALID, ...)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                     // Human-readable UTC event time (from helper)
+          ContextTimeStamp,             // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                 // Endpoint hostname
+          aid,                          // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,             // UPID of the process that performed the deletion; joins to ProcessRollup2 for actor attribution
+          // ▰▰▰[ Open Directory Operation ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ODNodeName,                   // OD node where the deletion occurred (e.g. /Local/Default for local accounts, /LDAPv3/... for directory services)
+          ODDatabasePath,               // On-disk path to the OD database (e.g. /var/db/dslocal/nodes/Default for local accounts)
+          UserNames,                    // Username(s) being deleted (structured JSON list: {"_name":"UserNames_F","usernames":["kathryng"]})
+          AuthenticationUuids,          // Raw AuthenticationAuthority UUIDs of the deleted user(s) (often empty unless the user had AltSecurityIdentities or external auth bindings)
+          AuthenticationUuidsAsStrings, // Human-readable string form of AuthenticationUuids
+          ODErrorCode                   // Operation result (decoded: SUCCESS, RECORD_PERMISSION_ERROR, CREDENTIALS_INVALID, RECORD_RECORD_NOT_FOUND, ...; 63 known values)
+      ],
+      limit=max
+  )

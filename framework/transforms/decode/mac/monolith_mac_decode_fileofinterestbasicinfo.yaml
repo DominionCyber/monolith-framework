@@ -1,0 +1,41 @@
+name: monolith_mac_decode_fileofinterestbasicinfo
+description: 'Decodes AuthenticationId (5-value enum) and FileOfInterestTriggerSource (6-value enum) on FileOfInterestBasicInfo events.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- fileofinterestbasicinfo
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for AuthenticationId (5 value branches; final `*` is the fallthrough)
+  | case {
+      AuthenticationId = "0"    | AuthenticationId := "INVALID_LUID";
+      AuthenticationId = "996"  | AuthenticationId := "NETWORK_SERVICE";
+      AuthenticationId = "997"  | AuthenticationId := "LOCAL_SERVICE";
+      AuthenticationId = "999"  | AuthenticationId := "SYSTEM";
+      AuthenticationId = "1000" | AuthenticationId := "RESERVED_LUID_MAX";
+      *
+  }
+
+  // case {}: enum decoder for FileOfInterestTriggerSource (6 value branches; final `*` is the fallthrough)
+  | case {
+      FileOfInterestTriggerSource = "0" | FileOfInterestTriggerSource := "UNKNOWN";
+      FileOfInterestTriggerSource = "1" | FileOfInterestTriggerSource := "FILE_WRITTEN";
+      FileOfInterestTriggerSource = "2" | FileOfInterestTriggerSource := "STATIC_ANALYSIS";
+      FileOfInterestTriggerSource = "3" | FileOfInterestTriggerSource := "MODULE_LOAD";
+      FileOfInterestTriggerSource = "4" | FileOfInterestTriggerSource := "DRIVER_LOAD";
+      FileOfInterestTriggerSource = "5" | FileOfInterestTriggerSource := "FILE_RENAME";
+      *
+  }

@@ -1,0 +1,37 @@
+name: monolith_mac_decode_dcbluetoothdeviceconnected
+description: 'Decodes BluetoothDeviceType (3-value enum) and BluetoothDeviceAddressType (4-value enum) on DcBluetoothDeviceConnected events.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- dcbluetoothdeviceconnected
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for BluetoothDeviceType (3 value branches; final `*` is the fallthrough)
+  | case {
+      BluetoothDeviceType = "0x01" | BluetoothDeviceType := "BTH_BR_EDR";
+      BluetoothDeviceType = "0x02" | BluetoothDeviceType := "BTH_LE";
+      BluetoothDeviceType = "0x00" | BluetoothDeviceType := "NONE";
+      *
+  }
+
+  // case {}: enum decoder for BluetoothDeviceAddressType (4 value branches; final `*` is the fallthrough)
+  | case {
+      BluetoothDeviceAddressType = "0x00" | BluetoothDeviceAddressType := "BTH_ADDR_PUBLIC";
+      BluetoothDeviceAddressType = "0x01" | BluetoothDeviceAddressType := "BTH_ADDR_RANDOM";
+      BluetoothDeviceAddressType = "0x02" | BluetoothDeviceAddressType := "BTH_ADDR_RANDOM_PRIVATE";
+      BluetoothDeviceAddressType = "0x03" | BluetoothDeviceAddressType := "BTH_ADDR_RANDOM_STATIC";
+      *
+  }

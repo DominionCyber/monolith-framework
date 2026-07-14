@@ -1,0 +1,83 @@
+name: monolith_mac_decode_httprequest
+description: 'Decodes HttpMethod (41-value enum), ConnectionDirection (5-value enum), and TrafficDirection (2-value enum) on HttpRequest events.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- httprequest
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for ConnectionDirection (5 value branches; final `*` is the fallthrough)
+  | case {
+      ConnectionDirection = "0" | ConnectionDirection := "OUTBOUND";
+      ConnectionDirection = "1" | ConnectionDirection := "INBOUND";
+      ConnectionDirection = "2" | ConnectionDirection := "NEITHER";
+      ConnectionDirection = "3" | ConnectionDirection := "BOTH";
+      ConnectionDirection = "4" | ConnectionDirection := "UNKNOWN";
+      *
+  }
+
+  // case {}: enum decoder for TrafficDirection (2 value branches; final `*` is the fallthrough)
+  | case {
+      TrafficDirection = "1" | TrafficDirection := "INGRESS";
+      TrafficDirection = "2" | TrafficDirection := "EGRESS";
+      *
+  }
+
+  // case {}: enum decoder for HttpMethod (41 value branches; final `*` is the fallthrough)
+  | case {
+      HttpMethod = "1"  | HttpMethod := "GET";
+      HttpMethod = "2"  | HttpMethod := "POST";
+      HttpMethod = "3"  | HttpMethod := "PUT";
+      HttpMethod = "4"  | HttpMethod := "DELETE";
+      HttpMethod = "5"  | HttpMethod := "PATCH";
+      HttpMethod = "6"  | HttpMethod := "HEAD";
+      HttpMethod = "7"  | HttpMethod := "OPTIONS";
+      HttpMethod = "8"  | HttpMethod := "CONNECT";
+      HttpMethod = "9"  | HttpMethod := "TRACE";
+      HttpMethod = "10" | HttpMethod := "PROPFIND";
+      HttpMethod = "11" | HttpMethod := "PROPPATCH";
+      HttpMethod = "12" | HttpMethod := "MKCOL";
+      HttpMethod = "13" | HttpMethod := "COPY";
+      HttpMethod = "14" | HttpMethod := "MOVE";
+      HttpMethod = "15" | HttpMethod := "LOCK";
+      HttpMethod = "16" | HttpMethod := "UNLOCK";
+      HttpMethod = "17" | HttpMethod := "VERSION_CONTROL";
+      HttpMethod = "18" | HttpMethod := "REPORT";
+      HttpMethod = "19" | HttpMethod := "CHECKOUT";
+      HttpMethod = "20" | HttpMethod := "CHECKIN";
+      HttpMethod = "21" | HttpMethod := "UNCHECKOUT";
+      HttpMethod = "22" | HttpMethod := "MKWORKSPACE";
+      HttpMethod = "23" | HttpMethod := "UPDATE";
+      HttpMethod = "24" | HttpMethod := "LABEL";
+      HttpMethod = "25" | HttpMethod := "MERGE";
+      HttpMethod = "26" | HttpMethod := "BASELINE_CONTROL";
+      HttpMethod = "27" | HttpMethod := "MKACTIVITY";
+      HttpMethod = "28" | HttpMethod := "ORDERPATCH";
+      HttpMethod = "29" | HttpMethod := "ACL";
+      HttpMethod = "30" | HttpMethod := "SEARCH";
+      HttpMethod = "31" | HttpMethod := "MKCALENDAR";
+      HttpMethod = "32" | HttpMethod := "BIND";
+      HttpMethod = "33" | HttpMethod := "UNBIND";
+      HttpMethod = "34" | HttpMethod := "REBIND";
+      HttpMethod = "35" | HttpMethod := "POLL";
+      HttpMethod = "36" | HttpMethod := "SUBSCRIBE";
+      HttpMethod = "37" | HttpMethod := "UNSUBSCRIBE";
+      HttpMethod = "38" | HttpMethod := "NOTIFY";
+      HttpMethod = "39" | HttpMethod := "ANNOTATE";
+      HttpMethod = "40" | HttpMethod := "PURGE";
+      HttpMethod = "41" | HttpMethod := "UNKNOWN";
+      *
+  }

@@ -1,0 +1,174 @@
+name: monolith_mac_match_processrollup2_dmgfilewritten
+description: Joins DmgFileWritten events with ProcessRollup2 events, surfacing macOS disk image (.dmg) writes enriched with the responsible process context. The match key is the process UPID (falconPID on DmgFileWritten, derived from ContextProcessId = TargetProcessId on PR2).
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- match
+- processrollup2
+- dmgfilewritten
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ L1 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Builds a lookup table of ProcessRollup2 events on Mac, keyed by TargetProcessId (the process the event describes)
+  defineTable(
+      query={
+        #event_simpleName=ProcessRollup2 event_platform=Mac
+        | $monolith_convert_file_extension()    // Parses FileName into FileExtension before extraction
+        | $monolith_convert_uid()               // Adds UID_readable sibling before extraction
+        | $monolith_convert_gid()               // Adds GID_readable sibling before extraction
+        | $monolith_mac_decode_processrollup2() // Decodes MachOSubType (8 vals) and CodeSigningFlags (27-bit mask)
+        | ContextSHA256HashData := SHA256HashData   // Rename to prevent collision with L2's SHA256HashData (the written file hash)
+      },
+      name=processes,
+      include=[
+          // ▰▰▰[ Match Key ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetProcessId,         // UPID of the process; joins to DmgFileWritten.falconPID
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,            // Endpoint hostname (envelope; same on both events)
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                // OS account that owns the writing process
+          UID,                     // Effective UID
+          UID_readable,            // Human-readable UID label (from convert_uid helper)
+          GID,                     // Effective GID
+          GID_readable,            // Human-readable GID label (from convert_gid helper)
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ParentBaseFileName,      // Basename of the parent binary (e.g. launchd, Safari, bash)
+          ContextBaseFileName,     // Basename of the writing-process binary (typically a browser, AppleArchive, or installer)
+          RawProcessId,            // OS-level PID of the writing process
+          // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          FilePath,                // Directory portion of the process binary path (from ImageFileName parser)
+          FileName,                // Basename of the process binary
+          FileExtension,           // Last extension of the process binary; "(none)" for most binaries
+          ContextSHA256HashData,   // SHA-256 of the process binary (renamed from SHA256HashData to avoid L2 collision)
+          // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          CommandLine              // Full command line of the writing process
+      ]
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Pulls DmgFileWritten events to be enriched with process context from L1
+  | #event_simpleName=DmgFileWritten event_platform=Mac
+  | $monolith_utility_falcon_pid()              // Translates ContextProcessId into falconPID (this event lacks TargetProcessId natively)
+
+  // ▰▰▰▰▰▰[ MATCH STATEMENT ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Inner join: keep only DmgFileWritten events whose falconPID matches a TargetProcessId in the processes table
+  | match(
+      table=processes,
+      field=falconPID,                          // L2-side UPID (derived from ContextProcessId by helper)
+      column=TargetProcessId                    // L1-side UPID (PR2's TargetProcessId)
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Enrichment for the L2 DmgFileWritten side (applied after the match so PR2 fields are also in scope)
+  | $monolith_convert_time_utc()                // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()           // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_size()               // Coalesces Size into ByteSize/CommonSize (human-readable size)
+  | $monolith_convert_removable_disk()          // Rewrites IsOnRemovableDisk 0/1 → No/Yes in place
+  | $monolith_mac_decode_dmgfilewritten()       // Decodes FileCategory (11 values: ARCHIVES, EXECUTABLE_FILES, OFFICE_DOCUMENTS, ...)
+
+  // ▰▰▰▰▰▰[ GROUP BY LOGIC ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Collapses many (PR2 + dmg) joined rows into one row per (host, written .dmg hash, file identifier) tuple
+  | groupBy(
+      [
+          aid,                  // Falcon agent ID; uniquely identifies the host
+          SHA256HashData,       // SHA-256 of the WRITTEN .dmg file (L2-side, post-rename of L1's hash); the analytical unit
+          FileIdentifier        // Sensor-side file identifier for the written file
+      ],
+      function=[
+          collect([
+              // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              utc_time,                    // Human-readable UTC event time (from helper)
+              ContextTimeStamp,            // Raw event time on host (epoch + ms)
+              // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ComputerName,                // Endpoint hostname (from L1)
+              // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              UserName,                    // OS account owning the writing process (from L1)
+              UID,                         // Effective UID (from L1)
+              UID_readable,                // Human-readable UID (from L1 helper)
+              GID,                         // Effective GID (from L1)
+              GID_readable,                // Human-readable GID (from L1 helper)
+              // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              TargetProcessId,             // UPID of the writing process (from L1)
+              RawProcessId,                // OS-level PID (from L1)
+              ParentBaseFileName,          // Basename of the parent binary (from L1)
+              ContextBaseFileName,         // Basename of the writing-process binary (from L1; typically a browser or installer)
+              // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              FilePath,                    // Directory of the process binary (from L1, overrides L2's parser of TargetFileName)
+              FileName,                    // Basename of the process binary (from L1, overrides L2)
+              FileExtension,               // Extension of the process binary (from L1)
+              ContextSHA256HashData,       // SHA-256 of the process binary (from L1, renamed to avoid collision)
+              // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              CommandLine,                 // Full command line of the writing process (from L1)
+              // ▰▰▰[ Written File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              TargetFileName,              // Full path of the written .dmg file (raw, unparsed)
+              FileSourcePath,              // Source path the .dmg came from (Mac-specific; the download or move-source location)
+              FileCategory,                // Content category (decoded: ARCHIVES is typical for .dmg)
+              FileIdentifier,              // Sensor-side file identifier
+              SHA256HashData,              // SHA-256 of the WRITTEN .dmg file (L2-side, the disk-image package hash)
+              // ▰▰▰[ File Properties ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              Size,                        // Written file size in bytes
+              CommonSize,                  // Human-readable size (from convert_file_size: e.g. "127 MB")
+              IsOnRemovableDisk,           // Drive type: Yes (external/USB/network) or No (internal) - converted in place by helper
+              // ▰▰▰[ Volume ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              DiskParentDeviceInstanceId,  // Physical device identifier of the disk
+              VolumeSessionUUID,           // Volume session correlation identifier
+              MipInformation               // Microsoft Information Protection label data (rarely populated on .dmg)
+          ])
+      ],
+      limit=max
+  )
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Final analyst view: one row per (host, written .dmg hash, file identifier) with full collected context for triage
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                    // Human-readable UTC event time
+          ContextTimeStamp,            // Raw event time on host
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                // Endpoint hostname
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                    // OS account owning the writing process
+          UID,                         // Effective UID
+          UID_readable,                // Human-readable UID label
+          GID,                         // Effective GID
+          GID_readable,                // Human-readable GID label
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetProcessId,             // UPID of the writing process
+          RawProcessId,                // OS-level PID
+          ParentBaseFileName,          // Basename of the parent binary
+          ContextBaseFileName,         // Basename of the writing-process binary (browser, installer, archive tool)
+          // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          FilePath,                    // Directory of the process binary
+          FileName,                    // Basename of the process binary
+          FileExtension,               // Extension of the process binary
+          ContextSHA256HashData,       // SHA-256 of the process binary
+          // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          CommandLine,                 // Full command line of the writing process
+          // ▰▰▰[ Written File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,              // Full path of the written .dmg file (raw)
+          FileSourcePath,              // Source path the .dmg came from (download/move source)
+          FileCategory,                // Content category (decoded; ARCHIVES is typical for .dmg)
+          FileIdentifier,              // Sensor-side file identifier
+          SHA256HashData,              // SHA-256 of the written .dmg file (disk-image package hash)
+          // ▰▰▰[ File Properties ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          Size,                        // Written file size in bytes
+          CommonSize,                  // Human-readable size (from helper)
+          IsOnRemovableDisk,           // Drive type: Yes or No (converted in place)
+          // ▰▰▰[ Volume ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DiskParentDeviceInstanceId,  // Physical device identifier
+          VolumeSessionUUID,           // Volume session correlation identifier
+          MipInformation               // MIP label data (if labeled)
+      ],
+      limit=max
+  )

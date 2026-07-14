@@ -1,0 +1,56 @@
+name: monolith_mac_base_imagehash
+description: Base query for ImageHash events. Decodes module-hash metadata.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- imagehash
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=ImageHash event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()           // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()      // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_extension()     // Parses FileName into FileExtension (e.g. "dylib", "bundle"); "(none)" if absent
+  | $monolith_mac_decode_imagehash()       // Decodes PrimaryModule 0/1 to FALSE/TRUE
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                // Human-readable UTC event time (from helper)
+          ContextTimeStamp,        // Raw event time on host when sensor processed (epoch + ms)
+          OriginalEventTimeStamp,  // Raw event time when the image load actually occurred (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,            // Endpoint hostname
+          aid,                     // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,        // UPID of the process emitting the event (typically same as TargetProcessId)
+          ContextThreadId,         // Thread ID within the process
+          TargetProcessId,         // UPID of the process that loaded the image; joins to ProcessRollup2
+          TreeId,                  // Process tree ID; groups related events
+          // ▰▰▰[ Image Details ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ImageFileName,           // Full path of the module/executable loaded
+          FilePath,                // Directory portion of ImageFileName (parser-derived)
+          FileName,                // Basename portion of ImageFileName (parser-derived)
+          FileExtension,           // Last extension of FileName (from helper); "(none)" if absent
+          PrimaryModule,           // TRUE = main executable; FALSE = dependent module (decoded by decode helper)
+          // ▰▰▰[ Hashes ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          MD5HashData,             // MD5 of the loaded image
+          SHA1HashData,             // SHA-1 of the loaded image (sensor emits all-zeros sentinel when not computed)
+          SHA256HashData           // SHA-256 of the loaded image
+      ],
+      limit=max
+  )

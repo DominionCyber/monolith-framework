@@ -1,0 +1,34 @@
+name: monolith_convert_time_utc
+description: 'Converts the raw epoch timestamp field to a human-readable UTC string in the new field utc_time. Used by every base/match template that displays event times.'
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- convert
+- time
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ CONVERSION ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | utc_time := timestamp                            // Copy epoch-ms `timestamp` into a new working field
+  | formatTime(                                      // formatTime(): converts epoch ms to a formatted string
+      format="%m-%d-%Y %H:%M:%S",                    //   strftime-style format (MM-DD-YYYY HH:MM:SS)
+      field=utc_time,                                //   read the epoch value from utc_time
+      locale=en_US,                                  //   locale-aware formatting (month names, etc.)
+      timezone=Z,                                    //   Z = UTC (Zulu) - normalizes display across analyst regions
+      as=utc_time                                    //   overwrite utc_time with the formatted result
+  )

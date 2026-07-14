@@ -1,0 +1,162 @@
+name: monolith_mac_decode_userlogonfailed2
+description: Decodes event fields using conditional logic to standardize values across different event sources.
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- userlogonfailed2
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for LogonType (12 value branches; final `*` is the fallthrough)
+  | case {
+      LogonType = "2"  | LogonType := "INTERACTIVE";
+      LogonType = "3"  | LogonType := "NETWORK";
+      LogonType = "4"  | LogonType := "BATCH";
+      LogonType = "5"  | LogonType := "SERVICE";
+      LogonType = "6"  | LogonType := "PROXY";
+      LogonType = "7"  | LogonType := "UNLOCK";
+      LogonType = "8"  | LogonType := "NETWORK_CLEARTEXT";
+      LogonType = "9"  | LogonType := "NEW_CREDENTIALS";
+      LogonType = "10" | LogonType := "REMOTE_INTERACTIVE";
+      LogonType = "11" | LogonType := "CACHED_INTERACTIVE";
+      LogonType = "12" | LogonType := "CACHED_REMOTE_INTERACTIVE";
+      LogonType = "13" | LogonType := "CACHED_UNLOCK";
+      *
+  }
+
+  // case {}: enum decoder for Status (46 value branches; final `*` is the fallthrough)
+  | case {
+      Status = "0"          | Status := "STATUS_SUCCESS";
+      Status = "258"        | Status := "STATUS_TIMEOUT";
+      Status = "259"        | Status := "STATUS_PENDING";
+      Status = "290"        | Status := "STATUS_NOTHING_TO_TERMINATE";
+      Status = "538181633"  | Status := "STATUS_COMPONENT_ENABLED";
+      Status = "1611530273" | Status := "STATUS_MASK_ADJUSTED";
+      Status = "1611726866" | Status := "STATUS_DEP_DISABLED_APPCOMPAT";
+      Status = "1611792386" | Status := "STATUS_NO_EXISTING_CREDENTIALS";
+      Status = "1611923478" | Status := "STATUS_COMPONENT_STOPPED";
+      Status = "1612251168" | Status := "STATUS_HTTP_VISIBILITY_ENABLED";
+      Status = "1612251176" | Status := "STATUS_SMTP_VISIBILITY_ENABLED";
+      Status = "1612447779" | Status := "STATUS_PREVENTION_NOT_NEEDED";
+      Status = "1612578852" | Status := "STATUS_ALREADY_BLOCKED";
+      Status = "2147483649" | Status := "STATUS_GUARD_PAGE_VIOLATION";
+      Status = "3221225473" | Status := "STATUS_UNSUCCESSFUL";
+      Status = "3221225485" | Status := "STATUS_INVALID_PARAMETER";
+      Status = "3221225492" | Status := "STATUS_UNRECOGNIZED_MEDIA";
+      Status = "3221225506" | Status := "STATUS_ACCESS_DENIED";
+      Status = "3221225524" | Status := "STATUS_OBJECT_NAME_NOT_FOUND";
+      Status = "3221225533" | Status := "STATUS_DATA_LATE_ERROR";
+      Status = "3221225541" | Status := "STATUS_INVALID_PAGE_PROTECTION";
+      Status = "3221225609" | Status := "STATUS_RESOURCE_DATA_NOT_FOUND";
+      Status = "3221225611" | Status := "STATUS_RESOURCE_NAME_NOT_FOUND";
+      Status = "3221225620" | Status := "STATUS_INTEGER_DIVIDE_BY_ZERO";
+      Status = "3221225653" | Status := "STATUS_IO_TIMEOUT";
+      Status = "3221225659" | Status := "STATUS_NOT_SUPPORTED";
+      Status = "3221225738" | Status := "STATUS_PROCESS_IS_TERMINATING";
+      Status = "3221225760" | Status := "STATUS_CANCELLED";
+      Status = "3221226029" | Status := "STATUS_RETRY";
+      Status = "3221226138" | Status := "STATUS_POLICY_OBJECT_NOT_FOUND";
+      Status = "3221226347" | Status := "STATUS_DRIVER_BLOCKED_CRITICAL";
+      Status = "3221227780" | Status := "STATUS_FILE_TOO_LARGE";
+      Status = "3226533891" | Status := "STATUS_LFO_STATIC_CONFIG_DOWNLOAD_DISABLED";
+      Status = "3758096423" | Status := "STATUS_PROCESS_KILLED";
+      Status = "3758358545" | Status := "STATUS_FEATURE_DISABLED";
+      Status = "3759013928" | Status := "STATUS_PROCESS_CRITICAL";
+      Status = "3759013929" | Status := "STATUS_PROCESS_WHITELISTED";
+      Status = "3759013930" | Status := "STATUS_PROCESS_MICROSOFT_SIGNED";
+      Status = "3759013931" | Status := "STATUS_PROCESS_APPLE_SIGNED";
+      Status = "3759407166" | Status := "STATUS_COMPONENT_DISABLED";
+      Status = "3760521403" | Status := "STATUS_NO_ACTIVE_RPC_THREAD";
+      Status = "3760849112" | Status := "STATUS_NON_CROWDSTRIKE";
+      Status = "3760914656" | Status := "STATUS_LFO_UPLOAD_FAILURE";
+      Status = "3760914657" | Status := "STATUS_LFO_UPLOAD_CLOUD_FAILURE";
+      Status = "3760914660" | Status := "STATUS_PROCESS_LSASS";
+      Status = "3760914661" | Status := "STATUS_PROCESS_CROWDSTRIKE";
+      *
+  }
+
+  // case {}: enum decoder for SSHAuditResult (10 value branches; final `*` is the fallthrough)
+  | case {
+      SSHAuditResult = "0" | SSHAuditResult := "LOGIN_EXCEED_MAXTRIES";
+      SSHAuditResult = "1" | SSHAuditResult := "LOGIN_ROOT_DENIED";
+      SSHAuditResult = "2" | SSHAuditResult := "AUTH_SUCCESS";
+      SSHAuditResult = "3" | SSHAuditResult := "AUTH_FAIL_NONE";
+      SSHAuditResult = "4" | SSHAuditResult := "AUTH_FAIL_PASSWD";
+      SSHAuditResult = "5" | SSHAuditResult := "AUTH_FAIL_KBDINT";
+      SSHAuditResult = "6" | SSHAuditResult := "AUTH_FAIL_PUBKEY";
+      SSHAuditResult = "7" | SSHAuditResult := "AUTH_FAIL_HOSTBASED";
+      SSHAuditResult = "8" | SSHAuditResult := "AUTH_FAIL_GSSAPI";
+      SSHAuditResult = "9" | SSHAuditResult := "INVALID_USER";
+      *
+  }
+
+  // bitfield:extractFlagsAsString(): expands UserLogonFlags (5 flags) into the new field UserLogonFlags_mask
+  | bitfield:extractFlagsAsString(
+      field="UserLogonFlags",
+      flagNames=[
+          [0, "LOGON_IS_SYNTHETIC"],
+          [1, "USER_IS_ADMIN"],
+          [2, "USER_IS_LOCAL"],
+          [3, "USER_IS_BUILT_IN"],
+          [4, "USER_IDENTITY_MISSING"]
+      ],
+      as="UserLogonFlags_mask",
+      separator=", "
+  )
+
+  // bitfield:extractFlagsAsString(): expands UserGroupsBitmask (30 flags) into the new field UserGroupsBitmask_mask
+  | bitfield:extractFlagsAsString(
+      field="UserGroupsBitmask",
+      flagNames=[
+          [0,  "GROUP_BUILTIN_ADMINISTRATOR"],
+          [1,  "GROUP_BUILTIN_POWERUSER"],
+          [2,  "GROUP_BUILTIN_REMOTE_MANAGEMENT"],
+          [3,  "GROUP_BUILTIN_DCOM"],
+          [4,  "GROUP_BUILTIN_NET_OPS"],
+          [5,  "GROUP_BUILTIN_BACKUP_OPS"],
+          [6,  "GROUP_BUILTIN_ACCOUNT_OPS"],
+          [7,  "GROUP_BUILTIN_USERS"],
+          [8,  "GROUP_BUILTIN_PERF_MONITOR"],
+          [9,  "GROUP_BUILTIN_PERF_LOG"],
+          [10, "GROUP_BUILTIN_GUESTS"],
+          [11, "GROUP_NT_AUTH_BATCH"],
+          [12, "GROUP_NT_AUTH_NETWORK"],
+          [13, "GROUP_NT_AUTH_SERVICE"],
+          [14, "GROUP_NT_AUTH_LOCAL_ACCOUNT"],
+          [15, "GROUP_NT_AUTH_LOCAL_ACCOUNT_AND_ADMIN"],
+          [16, "GROUP_NT_AUTH_INTERACTIVE"],
+          [17, "GROUP_NT_AUTH_ANONYMOUS"],
+          [18, "GROUP_NT_AUTH_AUTHENTICATED_USERS"],
+          [19, "GROUP_CONSOLE_LOGON"],
+          [20, "GROUP_NT_SERVICE_TRUSTEDINSTALLER"],
+          [32, "GROUP_DOMAIN_ADMINISTRATOR"],
+          [33, "GROUP_DOMAIN_USER"],
+          [34, "GROUP_DOMAIN_GUEST"],
+          [35, "GROUP_DOMAIN_ENTERPRISE_ADMIN"],
+          [36, "GROUP_DOMAIN_PROTECTED_USERS"],
+          [37, "GROUP_DOMAIN_POLICY_ADMIN"],
+          [38, "GROUP_DOMAIN_CERT_ADMIN"],
+          [39, "GROUP_DOMAIN_KEY_ADMIN"],
+          [40, "GROUP_DOMAIN_ENTERPRISE_KEY_ADMIN"]
+      ],
+      as="UserGroupsBitmask_mask",
+      separator=", "
+  )

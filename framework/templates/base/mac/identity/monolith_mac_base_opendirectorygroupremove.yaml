@@ -1,0 +1,50 @@
+name: monolith_mac_base_opendirectorygroupremove
+description: 'Base query for OpenDirectoryGroupRemove events on Mac. Surfaces macOS OpenDirectory group-member removal telemetry with decoded ODErrorCode and ODMemberType. The ODMemberType decoding reveals whether a username, user UUID, or nested group UUID was removed.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- opendirectorygroupremove
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=OpenDirectoryGroupRemove event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                      // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()                 // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_opendirectorygroupremove()   // Decodes ODErrorCode (63 values: SUCCESS, RECORD_PERMISSION_ERROR, ...) and ODMemberType (3 values: MEMBER_USER_NAME, MEMBER_USER_UUID, MEMBER_GROUP_UUID)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                     // Human-readable UTC event time (from helper)
+          ContextTimeStamp,             // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                 // Endpoint hostname
+          aid,                          // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,             // UPID of the process that performed the removal; joins to ProcessRollup2 for actor attribution
+          // ▰▰▰[ Open Directory Operation ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ODNodeName,                   // OD node where the operation occurred (e.g. /Local/Default for local accounts, /LDAPv3/... for directory services)
+          ODDatabasePath,               // On-disk path to the OD database (e.g. /var/db/dslocal/nodes/Default for local accounts)
+          ODGroupName,                  // Name of the group being modified (e.g. _lpadmin, admin, wheel, _appserveradm)
+          ODMemberType,                 // Type of member being removed (decoded: MEMBER_USER_NAME, MEMBER_USER_UUID, MEMBER_GROUP_UUID)
+          UserNames,                    // Username(s) being removed (structured JSON: {"_name":"UserNames_F","usernames":[...]}; "-" placeholder when ODMemberType is GROUP_UUID)
+          AuthenticationUuids,          // Raw UUID(s) of the member(s) being removed (structured JSON list; populated when ODMemberType is USER_UUID or GROUP_UUID)
+          AuthenticationUuidsAsStrings, // Human-readable string form of AuthenticationUuids
+          ODErrorCode                   // Operation result (decoded: SUCCESS, RECORD_PERMISSION_ERROR, CREDENTIALS_INVALID, RECORD_RECORD_NOT_FOUND, ...; 63 known values)
+      ],
+      limit=max
+  )

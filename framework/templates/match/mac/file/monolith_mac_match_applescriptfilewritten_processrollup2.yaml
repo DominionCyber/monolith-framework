@@ -1,0 +1,91 @@
+name: monolith_mac_match_applescriptfilewritten_processrollup2
+description: 'Inverse of processrollup2_applescriptfilewritten. L1 = AppleScriptFileWritten events (defineTable on falconPID), L2 = ProcessRollup2. PERFORMANCE: prefer this direction when filtering on specific .scpt paths or hashes.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- match
+- applescriptfilewritten
+- processrollup2
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ L1 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Builds a lookup table of AppleScriptFileWritten events on Mac, keyed by falconPID
+  // PERFORMANCE: prefer this direction when AppleScriptFileWritten is the narrow side (specific filter applied)
+  defineTable(
+      query={
+        #event_simpleName=AppleScriptFileWritten event_platform=Mac
+        | $monolith_utility_falcon_pid()        // Translates ContextProcessId into falconPID (the L1 join key)
+        | $monolith_convert_file_size()    // Computes ByteSize/CommonSize from Size
+      },
+      name=applescript_writes,
+      include=[
+          TargetFileName,  // Full path of the AppleScript file
+          Size,  // Script size in bytes
+          CommonSize,  // Human-readable size
+          SHA256HashData,  // SHA-256 of the script (sentinel values NOT decoded per framework rule)
+          FileCategory,  // File category (decoded)
+          falconPID  // L1 match key (derived from ContextProcessId)
+      ]
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Pulls ProcessRollup2 events on Mac to surface the actor process for each L1 event
+  | #event_simpleName=ProcessRollup2 event_platform=Mac
+  | $monolith_convert_uid()                     // Adds UID_readable sibling
+  | $monolith_convert_gid()                     // Adds GID_readable sibling
+  | $monolith_mac_decode_processrollup2()       // Decodes MachOSubType and CodeSigningFlags
+
+  // ▰▰▰▰▰▰[ MATCH STATEMENT ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Inner join: keep only PR2 records whose TargetProcessId matches an L1 falconPID
+  | match(
+      table=applescript_writes,
+      field=TargetProcessId,                    // L2-side UPID (PR2's process ID)
+      column=falconPID                          // L1-side UPID
+  )
+
+  // ▰▰▰▰▰▰[ L2 ENRICHMENT ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // After the match, both sides are in scope
+  | $monolith_convert_time_utc()                // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()           // Decodes Falcon numeric enums/bitfields into readable strings
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // One row per L1 event with the responsible process context attached
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                    // Human-readable UTC event time
+          ContextTimeStamp,            // Raw event time on host
+          // ▰▰▰[ Actor Process (from L2 PR2) ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ComputerName,                // Endpoint hostname
+              UserName,                    // OS account (process owner)
+              UID,                         // Effective UID
+              UID_readable,                // Human-readable UID
+              GID,                         // Effective GID
+              GID_readable,                // Human-readable GID
+              TargetProcessId,             // UPID of the actor process
+              RawProcessId,                // OS-level PID
+              ParentBaseFileName,          // Basename of the parent binary
+              ContextBaseFileName,         // Basename of the actor process
+              ImageFileName,               // Full path of the actor process binary
+              SHA256HashData,              // SHA-256 of the actor process binary
+              CommandLine                  // Full command line of the actor process,
+          // ▰▰▰[ L1 Event Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,    // Full path of the AppleScript file
+          Size,    // Script size in bytes
+          CommonSize,    // Human-readable size
+          SHA256HashData,    // SHA-256 of the script (sentinel values NOT decoded per framework rule)
+          FileCategory,    // File category (decoded)
+          falconPID                    // L1 join key (process UPID)
+      ],
+      limit=max
+  )

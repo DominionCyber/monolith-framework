@@ -1,0 +1,47 @@
+name: monolith_mac_coalesce_processrollup2
+description: 'Aliases an L1 ProcessRollup2 stream''s own fields to Child-prefixed names so they do not collide with the L2 ProcessRollup2 stream''s native fields after a parent-child match() join. Run on the L1 (child-perspective) defineTable stream; the surviving Child* fields end up as the child-process columns on each output row.'
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- coalesce
+- processrollup2
+- syntheticprocessrollup2
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ COALESCE FIELDS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Aliases the L1 PR2 stream's own fields to Child* before the match() join so
+  // the child-process attributes do not collide with the L2 parent stream's
+  // identically-named fields. ParentProcessId is NOT aliased (it is the join key
+  // against L2.TargetProcessId).
+  | ChildProcessId              := TargetProcessId      // L1 child's own UPID; becomes the child's identifier on each output row
+  | ChildRawProcessId           := RawProcessId         // L1 child's OS-level PID
+  | ChildImageFileName          := ImageFileName        // L1 child's full image path
+  | ChildFilePath               := FilePath             // L1 child's binary directory (parser-derived from ImageFileName)
+  | ChildFileName               := FileName             // L1 child's binary basename
+  | ChildCommandLine            := CommandLine          // L1 child's full command line as exec'd
+  | ChildSHA256HashData         := SHA256HashData       // L1 child binary hash
+  | ChildOriginalFilename       := OriginalFilename     // L1 child's signed-binary original name from Info.plist
+  | ChildUserName               := UserName             // L1 child's effective user account
+  | ChildUID                    := UID                  // L1 child's effective UID (numeric)
+  | ChildGID                    := GID                  // L1 child's effective GID (numeric)
+  | ChildMachOSubType           := MachOSubType         // L1 child binary type (decoded by decode_processrollup2 if it ran first)
+  | ChildCodeSigningFlags       := CodeSigningFlags     // L1 child signing-flags mask (decoded by decode_processrollup2 if it ran first)
+  | ChildProcessEntitlements    := ProcessEntitlements  // L1 child's Mach-O entitlements blob (sandbox/privilege capabilities)
+  | ChildContextBaseFileName    := ContextBaseFileName  // L1 child's actor binary basename (mirrors FileName for PR2 itself)

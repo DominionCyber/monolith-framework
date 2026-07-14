@@ -1,0 +1,49 @@
+name: monolith_mac_base_opendirectoryattributeremove
+description: 'Base query for OpenDirectoryAttributeRemove events on Mac. Surfaces macOS OpenDirectory attribute-removal operations with decoded ODErrorCode and ODRecordType. Useful for tracking changes to user-account attributes (Kerberos identity, shell, password policy, group memberships, home directory).'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- opendirectoryattributeremove
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=OpenDirectoryAttributeRemove event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                          // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()                     // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_opendirectoryattributeremove()   // Decodes ODErrorCode (63 values: SUCCESS, RECORD_PERMISSION_ERROR, CREDENTIALS_INVALID, ...) and ODRecordType (RECORD_TYPE_USER / RECORD_TYPE_GROUP)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,           // Human-readable UTC event time (from helper)
+          ContextTimeStamp,   // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,       // Endpoint hostname
+          aid,                // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,   // UPID of the process that performed the OD operation; joins to ProcessRollup2 for actor attribution
+          // ▰▰▰[ Open Directory Operation ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ODNodeName,         // OD node where the operation occurred (e.g. /Local/Default for local accounts, /LDAPv3/... for directory services)
+          ODDatabasePath,     // On-disk path to the OD database (e.g. /var/db/dslocal/nodes/Default for local accounts)
+          ODRecordType,       // Record type being modified (decoded: RECORD_TYPE_USER or RECORD_TYPE_GROUP)
+          ODRecordName,       // Name of the record being modified (e.g. ansonwong, LocalAdmin, jsmith)
+          ODAttributeName,    // Attribute being removed (e.g. dsAttrTypeStandard:AltSecurityIdentities, UserShell, AuthenticationAuthority)
+          ODAttributeValues,  // Value(s) being removed from the attribute (structured JSON: {"_name":"...","od_attribute_values":[...]})
+          ODErrorCode         // Operation result (decoded: SUCCESS, RECORD_PERMISSION_ERROR, CREDENTIALS_INVALID, NODE_UNKNOWN_NAME, ...; 63 known values)
+      ],
+      limit=max
+  )

@@ -1,0 +1,54 @@
+name: monolith_mac_base_fileofinterestbasicinfo
+description: 'Base query for FileOfInterestBasicInfo events. Decodes basic information about files Falcon flagged as notable with trigger source, process context, and hashes. NO SAMPLE DATA available at build time.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- fileofinterestbasicinfo
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=FileOfInterestBasicInfo event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                   // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()              // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_fileofinterestbasicinfo() // Decodes AuthenticationId (5 vals), FileOfInterestTriggerSource (6 vals) in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,         // Human-readable UTC event time (from helper)
+          ContextTimeStamp, // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName, // Endpoint hostname
+          aid,          // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,    // UPID of the associated process
+          ContextThreadId,     // Thread ID
+          ContextBaseFileName, // Basename of the process binary
+          TreeId,              // Process tree ID
+          AuthenticationId,    // Auth session ID (decoded; 5 values)
+          // ▰▰▰[ File of Interest ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,              // Path of the file
+          FilePath,                    // Directory portion (parser-derived)
+          FileName,                    // Basename (parser-derived)
+          FileOfInterestTriggerSource, // What triggered marking this file as interesting (decoded; 6 values)
+          FileIdentifier,              // Unique file ID for cross-event correlation
+          // ▰▰▰[ Hashes ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          SHA256HashData, // SHA-256 (sentinel values NOT decoded per framework rule)
+          MD5HashData     // MD5 hash
+      ],
+      limit=max
+  )

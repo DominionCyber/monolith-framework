@@ -1,0 +1,167 @@
+name: monolith_mac_match_processrollup2_dnsrequest
+description: Joins DnsRequest events with ProcessRollup2 events, surfacing DNS telemetry enriched with the responsible process context. The match key is the process UPID (falconPID on DnsRequest, derived from ContextProcessId = TargetProcessId on PR2).
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- match
+- processrollup2
+- dnsrequest
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ L1 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Builds a lookup table of ProcessRollup2 events on Mac, keyed by TargetProcessId (the process the event describes)
+  defineTable(
+      query={
+        #event_simpleName=ProcessRollup2 event_platform=Mac
+        | $monolith_convert_file_extension()    // Parses FileName into FileExtension before extraction
+        | $monolith_convert_uid()               // Adds UID_readable sibling before extraction
+        | $monolith_convert_gid()               // Adds GID_readable sibling before extraction
+        | $monolith_mac_decode_processrollup2() // Decodes MachOSubType (8 vals) and CodeSigningFlags (27-bit mask)
+      },
+      name=processes,
+      include=[
+          // ▰▰▰[ Match Key ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetProcessId,        // UPID of the process; joins to DnsRequest.falconPID (derived from its ContextProcessId)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,           // Endpoint hostname (envelope field; same value on both events)
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,               // OS account that owns the process
+          UID,                    // Effective UID (POSIX)
+          UID_readable,           // Human-readable UID label (from convert_uid helper)
+          GID,                    // Effective GID
+          GID_readable,           // Human-readable GID label (from convert_gid helper)
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ParentBaseFileName,     // Basename of the parent binary (e.g. launchd, bash, Finder)
+          ContextBaseFileName,    // Basename of the process binary (the actor)
+          RawProcessId,           // OS-level PID (not unique across reboots; use for human readability)
+          // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          FilePath,               // Directory portion of ImageFileName (parser-derived)
+          FileName,               // Basename portion of ImageFileName (parser-derived)
+          FileExtension,          // Last extension of FileName (from helper); "(none)" for most binaries
+          SHA256HashData,         // SHA-256 of the process binary
+          // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          CommandLine             // Full command line of the process (may be empty or truncated per dictionary)
+      ]
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Pulls DnsRequest events to be enriched with process context from L1
+  | #event_simpleName=DnsRequest event_platform=Mac
+  | $monolith_utility_falcon_pid()              // Translates ContextProcessId into falconPID for the match (DnsRequest lacks TargetProcessId natively)
+
+  // ▰▰▰▰▰▰[ MATCH STATEMENT ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Inner join: keep only DnsRequest events whose falconPID matches a TargetProcessId in the processes table
+  | match(
+      table=processes,
+      field=falconPID,                          // DnsRequest-side UPID (derived from ContextProcessId by helper)
+      column=TargetProcessId                    // PR2-side UPID (the process the event describes)
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Enrichment for the L2 DnsRequest side (applied after the match so PR2 fields are also in scope)
+  | $monolith_convert_time_utc()                // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()           // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_dnsrequest()           // Decodes RequestType (A/AAAA/MX/...) and QueryStatus enum values
+
+  // ▰▰▰▰▰▰[ GROUP BY LOGIC ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Collapses many (DNS + PR2) joined rows into one row per (host, process binary, domain) tuple
+  | groupBy(
+      [
+          aid,                  // Falcon agent ID; uniquely identifies the host
+          SHA256HashData,       // PR2 binary hash (from L1); uniquely identifies the executing image
+          DomainName            // DNS pivot; one row per queried FQDN per binary per host
+      ],
+      function=[
+          collect([
+              // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              utc_time,                  // Human-readable UTC event time (from helper)
+              // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ComputerName,              // Endpoint hostname (from L1)
+              // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              UserName,                  // OS account that owns the process (from L1)
+              UID,                       // Effective UID (from L1)
+              UID_readable,              // Human-readable UID label (from L1 helper)
+              GID,                       // Effective GID (from L1)
+              GID_readable,              // Human-readable GID label (from L1 helper)
+              // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              TargetProcessId,           // UPID of the process (from L1; same as falconPID via the match key)
+              RawProcessId,              // OS-level PID (from L1)
+              ParentBaseFileName,        // Basename of the parent binary (from L1)
+              ContextBaseFileName,       // Basename of the process binary - the actor (from L1)
+              // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              FilePath,                  // Directory portion of the binary path (from L1)
+              FileName,                  // Basename of the binary (from L1)
+              FileExtension,             // Last extension of FileName (from L1)
+              SHA256HashData,            // SHA-256 of the process binary (from L1)
+              // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              CommandLine,               // Full command line of the process (from L1)
+              // ▰▰▰[ DNS Query ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              DomainName,                // Full FQDN queried
+              BaseDomainName,            // PSL-aware base domain (Mac-specific sensor derivation)
+              RequestType,               // DNS query type (decoded: A, AAAA, MX, CNAME, PTR, TXT, ...)
+              QueryStatus,               // Query result code (decoded: NOERROR, NXDOMAIN, SERVFAIL, ...)
+              // ▰▰▰[ DNS Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              IsDnsResponse,             // 0 = query event, 1 = response event
+              IsSystemResolver,          // 1 = system resolver (mDNSResponder), 0 = app resolver
+              // ▰▰▰[ DNS Records ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              IP4Records,                // Semicolon-separated IPv4 results
+              IP6Records,                // Semicolon-separated IPv6 results
+              CNAMERecords,              // CNAME chain (if domain resolves via aliases)
+              RespondingDnsServer        // DNS server that answered the query
+          ])
+      ],
+      limit=max
+  )
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Final analyst view: one row per (host, binary, domain) with full collected context for triage
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,              // Human-readable UTC event time
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,          // Endpoint hostname
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,              // OS account that owns the process
+          UID,                   // Effective UID
+          UID_readable,          // Human-readable UID label
+          GID,                   // Effective GID
+          GID_readable,          // Human-readable GID label
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetProcessId,       // UPID of the process (joins downstream)
+          RawProcessId,          // OS-level PID
+          ParentBaseFileName,    // Basename of the parent binary
+          ContextBaseFileName,   // Basename of the process binary (the actor)
+          // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          FilePath,              // Directory portion of the binary path
+          FileName,              // Basename of the binary
+          FileExtension,         // Last extension; "(none)" for most binaries
+          SHA256HashData,        // SHA-256 of the process binary
+          // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          CommandLine,           // Full command line of the process
+          // ▰▰▰[ DNS Query ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DomainName,            // Full FQDN queried
+          BaseDomainName,        // PSL-aware base domain (e.g. google.com from mail.google.com)
+          RequestType,           // DNS query type (decoded)
+          QueryStatus,           // Query result code (decoded)
+          // ▰▰▰[ DNS Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          IsDnsResponse,         // 0 = query, 1 = response
+          IsSystemResolver,      // 1 = system resolver (mDNSResponder), 0 = app resolver
+          // ▰▰▰[ DNS Records ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          IP4Records,            // Semicolon-separated IPv4 results
+          IP6Records,            // Semicolon-separated IPv6 results
+          CNAMERecords,          // CNAME chain (if applicable)
+          RespondingDnsServer    // DNS server that answered the query
+      ],
+      limit=max
+  )

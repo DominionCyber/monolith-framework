@@ -1,0 +1,59 @@
+name: monolith_mac_decode_fileopeninfo
+description: Decodes FileMode on FileOpenInfo events. FileMode is the Unix open() flag value passed in by the calling process; bits 0-1 encode mutually-exclusive access mode (O_RDONLY/O_WRONLY/O_RDWR), and higher bits encode independent flag bits (O_NONBLOCK, O_APPEND, O_CREAT, etc.). Values are not documented in Falcon's data dictionary but are standardized in Darwin's <sys/fcntl.h>. Produces FileMode_mask containing readable flag-name labels.
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- fileopeninfo
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // bitfield:extractFlagsAsString(): expands <unknown> (0 flags) into the new field <unknown>_mask
+  | bitfield:extractFlagsAsString(
+      field=FileMode,
+      output=FileMode_mask,
+      flags=[
+        {bit=0,  label="O_WRONLY"},
+        {bit=1,  label="O_RDWR"},
+        {bit=2,  label="O_NONBLOCK"},
+        {bit=3,  label="O_APPEND"},
+        {bit=4,  label="O_SHLOCK"},
+        {bit=5,  label="O_EXLOCK"},
+        {bit=6,  label="O_ASYNC"},
+        {bit=7,  label="O_SYNC"},
+        {bit=8,  label="O_NOFOLLOW"},
+        {bit=9,  label="O_CREAT"},
+        {bit=10, label="O_TRUNC"},
+        {bit=11, label="O_EXCL"},
+        {bit=15, label="O_EVTONLY"},
+        {bit=17, label="O_NOCTTY"},
+        {bit=20, label="O_DIRECTORY"},
+        {bit=21, label="O_SYMLINK"},
+        {bit=22, label="O_DSYNC"},
+        {bit=24, label="O_CLOEXEC"},
+        {bit=29, label="O_NOFOLLOW_ANY"}
+      ]
+  )
+  // O_RDONLY (value 0) means no access-mode bits set; bitfield produces empty mask. Fill it explicitly:
+  // case {}: enum decoder for FileMode_mask (1 value branches; final `*` is the fallthrough)
+  | case {
+      FileMode_mask = "" | FileMode_mask := "O_RDONLY";
+      *
+  }

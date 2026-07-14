@@ -1,0 +1,57 @@
+name: monolith_mac_base_machoheaderparsed
+description: Base query for MachOHeaderParsed events. Decodes Mach-O header fields for image-parse telemetry.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- machoheaderparsed
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=MachOHeaderParsed event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()           // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_extension()          // Parses FileName into FileExtension (e.g. "dylib", "bundle", "framework")
+  | $monolith_mac_decode_machoheaderparsed()    // Decodes PrimaryModule 0/1 to FALSE/TRUE
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,               // Human-readable UTC event time (from helper)
+          ContextTimeStamp,       // Raw event time on host (epoch + ms); no readable conversion yet
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,           // Endpoint hostname
+          aid,                    // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,       // UPID of the process parsing the Mach-O; joins to ProcessRollup2
+          ContextBaseFileName,    // Basename of the parsing binary (e.g. ZoomUpdater)
+          // ▰▰▰[ Image Details ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,         // Full path of the Mach-O file being parsed
+          FilePath,               // Directory portion (parser-derived)
+          FileName,               // Basename portion (parser-derived)
+          FileExtension,          // Last extension of FileName (from helper); "(none)" if absent
+          SHA256HashData,         // SHA-256 of the Mach-O file
+          PrimaryModule,          // TRUE = main executable; FALSE = dependent module (decoded by helper)
+          // ▰▰▰[ Mach-O Dependencies ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DylibPath,              // Comma-separated dylibs the Mach-O depends on (LC_LOAD_DYLIB load commands)
+          RPath,                  // Runtime search path used to resolve @rpath-prefixed dylibs (LC_RPATH)
+          DylinkerPath,           // Path to the dynamic linker (typically /usr/lib/dyld; LC_LOAD_DYLINKER)
+          // ▰▰▰[ Rate Limiting ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          BoundingLimitCount,     // Sensor throttling count (heavy on this event: 2584/2586 in this sample)
+          BoundingLimitDuration   // Throttling window in ms (3600000 = 1 hour)
+      ],
+      limit=max
+  )

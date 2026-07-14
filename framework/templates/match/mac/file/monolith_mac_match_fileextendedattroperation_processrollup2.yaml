@@ -1,0 +1,158 @@
+name: monolith_mac_match_fileextendedattroperation_processrollup2
+description: "'Joins FileExtendedAttrOperation events with ProcessRollup2, surfacing extended-attribute operations enriched with responsible process context. Useful for tracking Gatekeeper-related attribute changes such as com.apple.quarantine state.'"
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- match
+- fileextendedattroperation
+- processrollup2
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ L1 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Builds a lookup table of FileExtendedAttrOperation events on Mac, keyed by falconPID (the process that performed the event)
+  defineTable(
+      query={
+        #event_simpleName=FileExtendedAttrOperation event_platform=Mac
+        | $monolith_utility_falcon_pid()        // Translates ContextProcessId into falconPID (the match key for non-PR2 events)
+        | $monolith_mac_decode_fileextendedattroperation()     // Event-specific enum/bitmask decoder
+      },
+      name=file_xattr_ops,
+      include=[
+          // ▰▰▰[ Match Key ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          falconPID,                          // Derived from ContextProcessId by the falcon_pid helper; joins to PR2.TargetProcessId
+          // ▰▰▰[ Target File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,                     // Full path of the file
+          FileIdentifier,                     // Sensor-side file identifier
+          VnodeType,                          // Type of filesystem object (file/dir/symlink)
+          Size,                               // File size in bytes
+          // ▰▰▰[ Extended Attribute ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ExtendedAttributeName,              // Name of the extended attribute (e.g. com.apple.quarantine, com.apple.metadata:kMDItemWhereFroms)
+          ExtendedAttributeCategory,          // Categorized attribute group (from helper)
+          ExtendedAttributeValue,             // Raw value of the attribute
+          ExtendedAttributeValueReadable,     // Human-readable value if applicable
+          ExtendedAttributeModificationType,  // Operation: CREATE, MODIFY, DELETE (decoded)
+          ExtendedAttributeStatus             // Operation result/status
+      ]
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Pulls ProcessRollup2 events to be enriched with event context from L1 (exact match anchor; excludes SyntheticPR2 and PR2Stats)
+  | #event_simpleName=ProcessRollup2 event_platform=Mac
+
+  // ▰▰▰▰▰▰[ MATCH STATEMENT ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Inner join: keep only PR2 events whose TargetProcessId matches a falconPID in the file_xattr_ops table
+  | match(
+      table=file_xattr_ops,
+      field=TargetProcessId,                  // PR2-side UPID (the process the event describes)
+      column=falconPID                        // L1-side UPID (derived from ContextProcessId by helper on the event side)
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Enrichment for the L2 ProcessRollup2 side (applied after the match so event fields are also in scope)
+  | $monolith_convert_time_utc()              // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()         // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_extension()        // Parses FileName into FileExtension; "(none)" if absent
+  | $monolith_convert_uid()                   // Adds UID_readable sibling (root, daemon, ...)
+  | $monolith_convert_gid()                   // Adds GID_readable sibling
+  | $monolith_mac_decode_processrollup2()     // Decodes MachOSubType, CodeSigningFlags (PR2-specific enum/bitmask)
+
+  // ▰▰▰▰▰▰[ GROUP BY LOGIC ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Collapses many joined rows into one row per (host, process binary, TargetFileName) tuple with full collected context
+  | groupBy(
+      [
+          aid,             // Falcon agent ID; uniquely identifies the host
+          SHA256HashData,  // PR2 binary hash; uniquely identifies the executing image
+          TargetFileName   // Event pivot; one row per unique value per binary per host
+      ],
+      function=[
+          collect([
+              // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              utc_time,                           // Human-readable UTC event time (from helper)
+              // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ComputerName,                       // Endpoint hostname (from L2)
+              // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              UserName,                           // OS account owning the actor process (from L2)
+              UID,                                // Effective UID (from L2)
+              UID_readable,                       // Human-readable UID (from L1 helper)
+              GID,                                // Effective GID (from L2)
+              GID_readable,                       // Human-readable GID (from L1 helper)
+              // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              TargetProcessId,                    // UPID of the actor process (from L2)
+              RawProcessId,                       // OS-level PID (from L2)
+              ParentBaseFileName,                 // Basename of the parent binary (from L2)
+              ContextBaseFileName,                // Basename of the actor process binary (from L2)
+              // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              FilePath,                           // Directory of the actor process binary (from L2)
+              FileName,                           // Basename of the actor process binary (from L2)
+              FileExtension,                      // Extension of the actor process binary (from L2)
+              SHA256HashData,                     // SHA-256 of the actor process binary (from L2)
+              // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              CommandLine,                        // Full command line of the actor process (from L2)
+              // ▰▰▰[ Target File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              TargetFileName,                     // Full path of the file
+              FileIdentifier,                     // Sensor-side file identifier
+              VnodeType,                          // Type of filesystem object (file/dir/symlink)
+              Size,                               // File size in bytes
+              // ▰▰▰[ Extended Attribute ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ExtendedAttributeName,              // Name of the extended attribute (e.g. com.apple.quarantine, com.apple.metadata:kMDItemWhereFroms)
+              ExtendedAttributeCategory,          // Categorized attribute group (from helper)
+              ExtendedAttributeValue,             // Raw value of the attribute
+              ExtendedAttributeValueReadable,     // Human-readable value if applicable
+              ExtendedAttributeModificationType,  // Operation: CREATE, MODIFY, DELETE (decoded)
+              ExtendedAttributeStatus             // Operation result/status
+          ])
+      ],
+      limit=max
+  )
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Final analyst view: one row per group key with collected context arranged for triage
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                           // Human-readable UTC event time (from helper)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                       // Endpoint hostname (from L2)
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                           // OS account owning the actor process (from L2)
+          UID,                                // Effective UID (from L2)
+          UID_readable,                       // Human-readable UID (from L1 helper)
+          GID,                                // Effective GID (from L2)
+          GID_readable,                       // Human-readable GID (from L1 helper)
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetProcessId,                    // UPID of the actor process (from L2)
+          RawProcessId,                       // OS-level PID (from L2)
+          ParentBaseFileName,                 // Basename of the parent binary (from L2)
+          ContextBaseFileName,                // Basename of the actor process binary (from L2)
+          // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          FilePath,                           // Directory of the actor process binary (from L2)
+          FileName,                           // Basename of the actor process binary (from L2)
+          FileExtension,                      // Extension of the actor process binary (from L2)
+          SHA256HashData,                     // SHA-256 of the actor process binary (from L2)
+          // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          CommandLine,                        // Full command line of the actor process (from L2)
+          // ▰▰▰[ Target File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,                     // Full path of the file
+          FileIdentifier,                     // Sensor-side file identifier
+          VnodeType,                          // Type of filesystem object (file/dir/symlink)
+          Size,                               // File size in bytes
+          // ▰▰▰[ Extended Attribute ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ExtendedAttributeName,              // Name of the extended attribute (e.g. com.apple.quarantine, com.apple.metadata:kMDItemWhereFroms)
+          ExtendedAttributeCategory,          // Categorized attribute group (from helper)
+          ExtendedAttributeValue,             // Raw value of the attribute
+          ExtendedAttributeValueReadable,     // Human-readable value if applicable
+          ExtendedAttributeModificationType,  // Operation: CREATE, MODIFY, DELETE (decoded)
+          ExtendedAttributeStatus             // Operation result/status
+      ],
+      limit=max
+  )

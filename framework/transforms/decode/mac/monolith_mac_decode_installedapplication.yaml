@@ -1,0 +1,77 @@
+name: monolith_mac_decode_installedapplication
+description: 'Decodes event fields using conditional logic to standardize values across different event sources. Handles four enum fields on InstalledApplication (Mac): AppType, AppProvider, AppPathFlag, UpdateFlag. NOTE on AppPathFlag and UpdateFlag - the data dictionary annotates these as bitmasks, but their documented values are sequential 0..N (enum semantics), so case-block decoding is correct and bitfield extraction would produce incorrect labels.'
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- installedapplication
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for AppType (6 value branches; final `*` is the fallthrough)
+  | case {
+      AppType = "0"    | AppType := "TYPE_ALL";
+      AppType = "1"    | AppType := "TYPE_UNINSTALL";
+      AppType = "2"    | AppType := "TYPE_CLSID";
+      AppType = "3"    | AppType := "TYPE_CUSTOM";
+      AppType = "4"    | AppType := "TYPE_APPLE_BUNDLE";
+      AppType = "1000" | AppType := "TYPE_INVALID";
+      *
+  }
+  // case {}: enum decoder for AppProvider (7 value branches; final `*` is the fallthrough)
+  | case {
+      AppProvider = "0" | AppProvider := "UNKNOWN";
+      AppProvider = "1" | AppProvider := "RPM";
+      AppProvider = "2" | AppProvider := "DPKG";
+      AppProvider = "3" | AppProvider := "APPLE_MAC_APP_STORE";
+      AppProvider = "4" | AppProvider := "PYTHON_PIP";
+      AppProvider = "5" | AppProvider := "FLATPAK";
+      AppProvider = "6" | AppProvider := "SNAP";
+      *
+  }
+  // case {}: enum decoder for AppPathFlag (15 value branches; final `*` is the fallthrough)
+  | case {
+      AppPathFlag = "0"  | AppPathFlag := "APP_PATH_INVALID";
+      AppPathFlag = "1"  | AppPathFlag := "DIRECTORY_CUSTOM";
+      AppPathFlag = "2"  | AppPathFlag := "FILE_CUSTOM";
+      AppPathFlag = "3"  | AppPathFlag := "FILE_DISPLAY_ICON";
+      AppPathFlag = "4"  | AppPathFlag := "FILE_UNINSTALL_STRING";
+      AppPathFlag = "5"  | AppPathFlag := "FILE_MODIFY_PATH";
+      AppPathFlag = "6"  | AppPathFlag := "FILE_CLSID_LOCAL_SERVER32";
+      AppPathFlag = "7"  | AppPathFlag := "FILE_CLSID_INPROC_SERVER32";
+      AppPathFlag = "8"  | AppPathFlag := "DIRECTORY_INSTALL_LOCATION";
+      AppPathFlag = "9"  | AppPathFlag := "DIRECTORY_INSTALL_LOCATION_FAILED_MSI";
+      AppPathFlag = "10" | AppPathFlag := "FILE_MSI_LOCAL_PACKAGE";
+      AppPathFlag = "11" | AppPathFlag := "FAILED_NO_MSI_FILE";
+      AppPathFlag = "12" | AppPathFlag := "FAILED_NO_UNINSTALL_INFO";
+      AppPathFlag = "13" | AppPathFlag := "NOT_AVAILABLE_CUSTOM";
+      AppPathFlag = "14" | AppPathFlag := "FILESYSTEM_INDEX";
+      *
+  }
+  // case {}: enum decoder for UpdateFlag (6 value branches; final `*` is the fallthrough)
+  | case {
+      UpdateFlag = "0" | UpdateFlag := "UPDATE_INVALID";
+      UpdateFlag = "1" | UpdateFlag := "UPDATE_ENUMERATION";
+      UpdateFlag = "2" | UpdateFlag := "UPDATE_REMOVED";
+      UpdateFlag = "3" | UpdateFlag := "UPDATE_ADDED";
+      UpdateFlag = "4" | UpdateFlag := "UPDATE_OBSOLETE";
+      UpdateFlag = "5" | UpdateFlag := "UPDATE_REVISED";
+      *
+  }

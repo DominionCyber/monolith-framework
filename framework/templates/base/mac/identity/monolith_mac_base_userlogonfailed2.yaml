@@ -1,0 +1,68 @@
+name: monolith_mac_base_userlogonfailed2
+description: Base query for UserLogonFailed2 events. Decodes failed logon attempts on macOS.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- userlogonfailed2
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=UserLogonFailed2 event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                  // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()             // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_uid()                       // Adds UID_readable sibling (root, daemon, ...)
+  | $monolith_mac_decode_userlogonfailed2()       // Decodes LogonType (12), Status (46), SSHAuditResult (10), UserLogonFlags (6-bit), UserGroupsBitmask (30-bit)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                // Human-readable UTC event time (from helper)
+          ContextTimeStamp,        // Raw event time on host (epoch + ms); no readable conversion yet
+          PasswordLastSet,         // Epoch timestamp when the account's password was last changed
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,            // Endpoint hostname (the host where the failure occurred)
+          aid,                     // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,        // UPID of the authentication-handling process (sshd, loginwindow, securityd)
+          RawProcessId,            // OS-level PID; not unique across reboots
+          // ▰▰▰[ User Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                // Account being authenticated as (the target of the attempt)
+          UID,                     // POSIX UID of the target account
+          UID_readable,            // Human-readable UID label (from convert_uid helper)
+          UserPrincipal,           // Fully-qualified user principal (UserName@MachineDomain)
+          UserIsAdmin,             // 1 if target is local admin; 0 otherwise
+          // ▰▰▰[ Logon Attempt ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          LogonType,               // Attempted logon mechanism (decoded: INTERACTIVE, NETWORK, REMOTE_INTERACTIVE, ...)
+          ClientComputerName,      // Hostname of the system that initiated the attempt (often matches ComputerName for local)
+          RemoteAddressIP4,        // Remote IPv4 source of the attempt (populated for NETWORK / REMOTE_INTERACTIVE)
+          RemoteAddressIP6,        // Remote IPv6 source of the attempt
+          // ▰▰▰[ Authentication ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          AuthenticationId,        // LUID-like identifier; sentinels: INVALID(0), NETWORK_SERVICE(996), LOCAL_SERVICE(997), SYSTEM(999), RESERVED(1000)
+          LogonDomain,             // Domain the attempt was made against (empty on local accounts)
+          MachineDomain,           // Domain the target machine is joined to (empty on standalone Macs)
+          // ▰▰▰[ Failure ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          Status,                  // NTSTATUS code (decoded: STATUS_UNSUCCESSFUL, STATUS_ACCESS_DENIED, ...); generic failure = STATUS_UNSUCCESSFUL
+          SubStatus,               // NTSTATUS subcode (often 0; provides finer-grained reason when populated)
+          SSHAuditResult,          // SSH-specific failure (decoded: AUTH_FAIL_PASSWD, AUTH_FAIL_PUBKEY, LOGIN_EXCEED_MAXTRIES, INVALID_USER, ...); empty for non-SSH
+          // ▰▰▰[ Privileges ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserLogonFlags,          // Raw bitmask of logon characteristics for the target account
+          UserLogonFlags_mask,     // Decoded logon flag names (from helper: USER_IS_ADMIN, USER_IS_LOCAL, ...)
+          UserGroupsBitmask,       // Raw bitmask of group memberships for the target account
+          UserGroupsBitmask_mask   // Decoded group names (from helper)
+      ],
+      limit=max
+  )

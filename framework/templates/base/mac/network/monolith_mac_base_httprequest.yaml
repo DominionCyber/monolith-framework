@@ -1,0 +1,69 @@
+name: monolith_mac_base_httprequest
+description: 'Base query for HttpRequest events on Mac. Decodes Falcon-extracted HTTP request metadata (method, host, path, headers, user agent) with full process context (UPID, image, command line) and effective-endpoint enrichment for proxied connections.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- httprequest
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=HttpRequest event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()       // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()  // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_httprequest() // Decodes HttpMethod, ConnectionDirection, TrafficDirection in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                  // Human-readable UTC event time (from helper)
+          ContextTimeStamp,          // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,              // Endpoint hostname
+          aid,                       // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,          // UPID of the requesting process; joins to ProcessRollup2
+          ImageFileName,             // Full path of the requesting process binary
+          CommandLine,               // Command line of the requesting process
+          ProxyingProcessId,         // UPID of the proxying process (typically same as ContextProcessId for direct connections)
+          // ▰▰▰[ Connection Direction ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ConnectionDirection,       // OUTBOUND / INBOUND / NEITHER / BOTH / UNKNOWN (decoded; 5 values)
+          TrafficDirection,          // Traffic direction (decoded; 2 values: INGRESS, EGRESS)
+          // ▰▰▰[ Endpoints (Direct) ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          LocalAddressIP4,           // Local IPv4 address (parser-derived enrichment)
+          LocalPort,                 // Local TCP/UDP port
+          RemoteAddressIP4,          // Remote IPv4 address (HTTP server)
+          RemoteAddressIP6,          // Remote IPv6 address (HTTP server, or IPv4-mapped IPv6 for dual-stack)
+          RemotePort,                // Remote TCP/UDP port (usually 80 or 8080)
+          DomainName,                // Domain name (parsed from HttpHost or DNS resolution)
+          // ▰▰▰[ Endpoints (Effective, post-proxy) ]▰▰▰▰▰▰▰▰▰▰
+          EffectiveRemoteAddressIP4, // Effective remote IPv4 after proxy unwrapping; differs from RemoteAddressIP4 when traffic is proxied
+          EffectiveRemoteAddressIP6, // Effective remote IPv6 after proxy unwrapping
+          EffectiveRemotePort,       // Effective remote port after proxy unwrapping
+          EffectiveDomainName,       // Effective domain after proxy unwrapping (the actual target the user requested)
+          // ▰▰▰[ HTTP Request ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          HttpMethod,                // HTTP method (decoded; 41 known values: GET, POST, PUT, DELETE, OPTIONS, ...)
+          HttpHost,                  // Host header value (target host:port)
+          HttpPath,                  // Request URI path (including query string)
+          HttpUserAgent,             // User-Agent header
+          HttpRequestHeader,         // Full request header dump (raw text)
+          HttpHeaderIsTruncated,     // 1 if HttpRequestHeader was truncated for size, else 0
+          HttpBodyLength,            // Request body length in bytes
+          HttpBodyIsTruncated,       // 1 if body was truncated, else 0
+          HttpExchangeIndex         // Sequential index of this request within the connection; pairs with HttpResponse.HttpExchangeIndex for request/response join
+      ],
+      limit=max
+  )

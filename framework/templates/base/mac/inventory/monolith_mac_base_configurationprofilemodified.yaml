@@ -1,0 +1,59 @@
+name: monolith_mac_base_configurationprofilemodified
+description: 'Base query for ConfigurationProfileModified events on Mac. Surfaces macOS configuration-profile (MDM/MCX/Profile Manager .mobileconfig) install/modify/remove telemetry with decoded ProfileModificationType and ProfileSource. The event embeds actor context (ImageFileName + ResponsiblePid) directly, so most analytical work needs no PR2 join.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- configurationprofilemodified
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=ConfigurationProfileModified event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                          // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()                     // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_extension()                    // Parses FileName (from ImageFileName) into FileExtension
+  | $monolith_mac_decode_configurationprofilemodified()   // Decodes ProfileModificationType (3 values: ADDED, MODIFIED, REMOVED) and ProfileSource (2 values: SOURCE_MANAGED, SOURCE_MANUAL) in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                // Human-readable UTC event time (from helper)
+          ContextTimeStamp,        // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,            // Endpoint hostname
+          aid,                     // Falcon agent ID; primary host key
+          // ▰▰▰[ Actor Process ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,        // UPID of the modifying process; joins to ProcessRollup2
+          ResponsiblePid,          // Mac-specific responsible-process UPID (often differs from ContextProcessId for user-initiated actions handled by system daemons)
+          ImageFileName,           // Full path of the actor binary (typically /usr/libexec/mdmclient for MDM-managed installs)
+          FilePath,                // Directory portion of ImageFileName (parser-derived)
+          FileName,                // Basename of ImageFileName (parser-derived)
+          FileExtension,           // Last extension of FileName (from helper); "(none)" for daemon binaries
+          // ▰▰▰[ Profile Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ProfileIdentifier,       // Profile reverse-DNS identifier (e.g. "com.apple.security.scep")
+          ProfileDisplayName,      // Human-readable profile name (e.g. "macOS - Network MI-Associate/V_3")
+          ProfileUUID,             // Per-instance UUID with version suffix (e.g. "..._3" = third version of this profile)
+          ProfileOrganization,     // Organization that authored the profile (often empty for Apple/system profiles)
+          // ▰▰▰[ Modification Details ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ProfileModificationType, // What happened (decoded: ADDED, MODIFIED, REMOVED)
+          ProfileScope,            // Scope ("system" = applies to whole host; "user" = applies per-user-account; already readable, not decoded)
+          ProfileSource,           // Install path (decoded: SOURCE_MANAGED = pushed via MDM; SOURCE_MANUAL = locally installed)
+          // ▰▰▰[ Rate Limiting ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          BoundingLimitCount,      // Sensor-observed count when throttling kicked in (sparse: ~1% of events)
+          BoundingLimitDuration    // Throttling window in ms (e.g. 3600000 = 1 hour)
+      ],
+      limit=max
+  )

@@ -1,0 +1,107 @@
+name: monolith_mac_match_processrollup2_archivefilewritten
+description: 'Joins archive file-write events (Arj, Bzip2, Cab, Gzip, Lzfse, Lzma, Rar, SevenZip, Tar, Xz, Zip, Zstd FileWritten) with ProcessRollup2 events. Uses a regex #event_simpleName filter to catch all archive types in one cradle. Surfaces archive creation activity attributed to the writing process. The #event_simpleName column reveals which specific archive event fired.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- match
+- processrollup2
+- archivefilewritten
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ L1 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Builds a lookup table of ProcessRollup2 events on Mac, keyed by TargetProcessId
+  defineTable(
+      query={
+        #event_simpleName=ProcessRollup2 event_platform=Mac
+        | $monolith_convert_uid()               // Adds UID_readable sibling
+        | $monolith_convert_gid()               // Adds GID_readable sibling
+        | $monolith_mac_decode_processrollup2() // Decodes MachOSubType and CodeSigningFlags
+      },
+      name=processes,
+      include=[
+          // ▰▰▰[ Match Key ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetProcessId,         // L1-side UPID; joins to L2.falconPID
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,            // Endpoint hostname (envelope; same on L1 and L2)
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                // OS account that owns the actor process
+          UID,                     // Effective UID
+          UID_readable,            // Human-readable UID
+          GID,                     // Effective GID
+          GID_readable,            // Human-readable GID
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ParentBaseFileName,      // Basename of the parent binary
+          ContextBaseFileName,     // Basename of the actor process
+          RawProcessId,            // OS-level PID
+          // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ImageFileName,           // Full path of the actor process binary
+          SHA256HashData,          // SHA-256 of the actor process binary
+          // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          CommandLine              // Full command line of the actor process
+      ]
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Pulls target events on Mac to be enriched with process context from L1
+  | #event_simpleName=/ArjFileWritten|Bzip2FileWritten|CabFileWritten|GzipFileWritten|LzfseFileWritten|LzmaFileWritten|RarFileWritten|SevenZipFileWritten|TarFileWritten|XzFileWritten|ZipFileWritten|ZstdFileWritten/ event_platform=Mac
+  | $monolith_utility_falcon_pid()           // Translates ContextProcessId into falconPID (the L2 join key)
+  | $monolith_convert_file_size()              // Computes ByteSize/CommonSize from Size
+  | $monolith_convert_removable_disk()              // Rewrites IsOnRemovableDisk 0/1 to No/Yes
+
+  // ▰▰▰▰▰▰[ MATCH STATEMENT ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Inner join: keep only L2 events whose falconPID matches a TargetProcessId in the processes table
+  | match(
+      table=processes,
+      field=falconPID,                          // L2-side UPID (derived from ContextProcessId by helper)
+      column=TargetProcessId                    // L1-side UPID (PR2's TargetProcessId)
+  )
+
+  // ▰▰▰▰▰▰[ L2 ENRICHMENT ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // After the match, both L1 and L2 fields are in scope. Enrich the joined row.
+  | $monolith_convert_time_utc()                // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()           // Decodes Falcon numeric enums/bitfields into readable strings
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // One row per event with process context attached
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                    // Human-readable UTC event time
+          ContextTimeStamp,            // Raw event time on host
+          // ▰▰▰[ Actor Process (from L1 PR2) ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ComputerName,                // Endpoint hostname
+              UserName,                    // OS account (process owner)
+              UID,                         // Effective UID
+              UID_readable,                // Human-readable UID
+              GID,                         // Effective GID
+              GID_readable,                // Human-readable GID
+              TargetProcessId,             // UPID of the actor process
+              RawProcessId,                // OS-level PID
+              ParentBaseFileName,          // Basename of the parent binary
+              ContextBaseFileName,         // Basename of the actor process
+              ImageFileName,               // Full path of the actor process binary
+              SHA256HashData,              // SHA-256 of the actor process binary
+              CommandLine                  // Full command line of the actor process,
+          // ▰▰▰[ Event-specific (from L2) ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              #event_simpleName,           // Which specific archive event fired (Arj/Bzip2/Cab/Gzip/Lzfse/Lzma/Rar/SevenZip/Tar/Xz/Zip/Zstd FileWritten)
+              TargetFileName,              // Full path of the archive file
+              Size,                        // Archive size in bytes (raw)
+              CommonSize,                  // Human-readable size
+              SHA256HashData,              // SHA-256 of the archive (sentinel values NOT decoded per framework rule)
+              FileCategory,                // File category (decoded: ARCHIVES expected)
+              IsOnRemovableDisk,           // Yes/No (decoded)
+              VolumeSessionUUID,           // Per-mount volume session ID
+              DiskParentDeviceInstanceId   // Parent disk device instance ID
+      ],
+      limit=max
+  )

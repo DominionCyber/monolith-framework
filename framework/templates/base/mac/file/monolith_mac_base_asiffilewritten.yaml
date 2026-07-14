@@ -1,0 +1,47 @@
+name: monolith_mac_base_asiffilewritten
+description: Base query for AsifFileWritten events. Decodes file-write metadata for Apple Sparse Image (.asif) content.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- asiffilewritten
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=AsifFileWritten event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()
+  | $monolith_utility_falcon_helper()
+  | $monolith_convert_file_size()
+  | $monolith_mac_decode_asiffilewritten()
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          utc_time,
+          ComputerName,
+          UserName,
+          ContextBaseFileName,
+          ContextImageFileName,
+          TargetFileName,
+          TargetDirectoryName,
+          Size,
+          CommonSize,
+          SHA256HashData,
+          FileObject,
+          FileIdentifier,
+          FileCategory
+      ],
+      limit=max
+  )

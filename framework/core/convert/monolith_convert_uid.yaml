@@ -1,0 +1,36 @@
+name: monolith_convert_uid
+description: 'Maps numeric POSIX UID to a human-readable account label in the new field UID_readable. Unknown UIDs surface the raw numeric value so the column is always populated.'
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- convert
+- posix_uid
+- posix
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ CONVERSION ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | case {                                                       // case {}: write UID_readable; original UID untouched
+      UID = "0"   | UID_readable := "root";                      //   0 = root superuser
+      UID = "1"   | UID_readable := "daemon";                    //   1 = system daemon
+      UID = "70"  | UID_readable := "_www";                      //   70 = apache/httpd user
+      UID = "74"  | UID_readable := "_mysql";                    //   74 = MySQL daemon user
+      UID = "99"  | UID_readable := "nobody";                    //   99 = unprivileged catch-all
+      UID = "501" | UID_readable := "first-user-or-mdm-managed"; //   501 = first interactive macOS user (or MDM default)
+      *           | UID_readable := UID;                         //   fallthrough: copy raw UID to keep column populated
+  }

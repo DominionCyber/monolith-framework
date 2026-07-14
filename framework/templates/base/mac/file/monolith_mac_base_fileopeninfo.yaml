@@ -1,0 +1,68 @@
+name: monolith_mac_base_fileopeninfo
+description: Base query for FileOpenInfo events on Mac. Surfaces file-open syscall telemetry with POSIX-permission and open()-flag decoding. Useful for file-enumeration detection, sensitive-file reconnaissance, and access-pattern hunting.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- fileopeninfo
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=FileOpenInfo event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()           // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()      // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_uid()                // Adds UID_readable sibling
+  | $monolith_convert_gid()                // Adds GID_readable sibling
+  | $monolith_convert_unix_posix_mode()    // Decodes UnixMode into UnixMode_octal + Owner/Group/Other perm strings
+  | $monolith_mac_decode_fileopeninfo()    // Decodes FileMode into FileMode_mask (O_RDONLY/O_WRONLY/O_RDWR + flag bits)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,              // Human-readable UTC event time (from helper)
+          ContextTimeStamp,      // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,          // Endpoint hostname
+          aid,                   // Falcon agent ID; primary host key
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,              // OS account of the actor process (sparse on some events)
+          UID,                   // File-owner UID (Unix)
+          UID_readable,          // Human-readable UID label (from convert_uid helper)
+          GID,                   // File-owner GID (Unix; 20 = "staff", 0 = "wheel", etc.)
+          GID_readable,          // Human-readable GID label (from convert_gid helper)
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,      // UPID of the opening process; joins to ProcessRollup2
+          ContextThreadId,       // UTID of the opening thread; commonly 0 (sentinel) for kernel-level opens
+          TreeId,                // Process tree ID; groups related events
+          // ▰▰▰[ Opened File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,        // Full path of the opened file
+          FilePath,              // Directory portion of TargetFileName (parser-derived)
+          FileName,              // Basename of TargetFileName (parser-derived)
+          // ▰▰▰[ Open Mode ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          FileMode,              // Raw Unix open() flag value (e.g. 5)
+          FileMode_mask,         // Decoded flag names (e.g. "O_WRONLY,O_NONBLOCK") (from helper)
+          // ▰▰▰[ File Permissions ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UnixMode,              // Raw POSIX mode bits (e.g. 384 = 0o600)
+          UnixMode_octal,        // Octal POSIX mode (decoded; e.g. "600")
+          OwnerPerms,            // Owner permissions (decoded; e.g. "rw-")
+          GroupPerms,            // Group permissions (decoded)
+          OtherPerms,            // Other permissions (decoded)
+          // ▰▰▰[ Rate Limiting ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          BoundingLimitCount,    // Sensor-observed count when throttling kicked in (sparse: ~0.1% of events)
+          BoundingLimitDuration  // Throttling window in ms (e.g. 3600000 = 1 hour)
+      ],
+      limit=max
+  )

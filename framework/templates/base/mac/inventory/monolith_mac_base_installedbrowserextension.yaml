@@ -1,0 +1,66 @@
+name: monolith_mac_base_installedbrowserextension
+description: Base query for InstalledBrowserExtension events. Decodes browser-extension inventory for Chrome, Firefox, Safari, and Edge.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- installedbrowserextension
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=InstalledBrowserExtension event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                         // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()                    // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_installedbrowserextension()     // Decodes BrowserExtensionInstallMethod, BrowserName, BrowserExtensionArchitecture, BrowserExtensionStatusEnabled, UpdateFlag
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                              // Human-readable UTC event time (from helper)
+          BatchTimestamp,                        // Epoch timestamp identifying the enumeration batch this event belongs to
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                          // Endpoint hostname
+          aid,                                   // Falcon agent ID; primary host key
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                              // OS username who owns the browser profile
+          UserSid,                               // User Security Identifier (e.g. S-1-5-21-...)
+          // ▰▰▰[ Browser ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          BrowserName,                           // Browser type (decoded: FIREFOX, CHROME, SAFARI, EDGE_CHROMIUM, ...)
+          BrowserVersion,                        // Browser version string (e.g. 149.0.2)
+          BrowserFilePath,                       // Install path of the browser executable
+          BrowserFileHash,                       // SHA-256 of the browser executable
+          BrowserProfileName,                    // Profile name (e.g. default-release for Firefox)
+          BrowserProfileId,                      // Profile identifier within the browser
+          // ▰▰▰[ Extension Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          BrowserExtensionId,                    // Unique extension identifier (e.g. newtab@mozilla.org)
+          BrowserExtensionName,                  // Human-readable extension name
+          BrowserExtensionVersion,               // Extension version string
+          BrowserExtensionAuthor,                // Extension author/publisher (sparse; populated when manifest declares it)
+          // ▰▰▰[ Extension Details ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          BrowserExtensionPath,                  // Install path on disk
+          BrowserExtensionArchitecture,          // Manifest format (decoded: MANIFEST_V2, MANIFEST_V3, SAFARI_APP, UNKNOWN)
+          BrowserExtensionInstallMethod,         // How installed (decoded: BROWSER, WEBSTORE, GPO, SIDELOADED, WEBSTORE_3RD_PARTY, UNIDENTIFIED)
+          BrowserExtensionStatusEnabled,         // ENABLED / DISABLED (decoded from 1/0 by helper)
+          BrowserExtensionRequestedPermissions,  // Comma-separated permissions requested by the extension
+          BrowserExtensionInstalledTimestamp,    // Epoch timestamp when the extension was originally installed
+          // ▰▰▰[ Sensor Metadata ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UpdateFlag,                            // Always UPDATE_ENUMERATION on Mac (decoded by helper)
+          BatchDataNumber,                       // Position of this event within its enumeration batch
+          BatchDataTotal,                        // Total events in this enumeration batch
+          CloudRequestId                         // Cloud-side request ID for this enumeration cycle
+      ],
+      limit=max
+  )

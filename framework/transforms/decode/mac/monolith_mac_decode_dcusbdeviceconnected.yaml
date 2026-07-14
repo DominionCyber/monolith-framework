@@ -1,0 +1,68 @@
+name: monolith_mac_decode_dcusbdeviceconnected
+description: 'Decodes DeviceConnectionStatus (10-value enum), DcPolicyAction (3-value enum), DcPolicyFlags (8-flag bitmask), and DcPolicyMassStorageBlockPermissions (4-value enum) on DcUsbDeviceConnected events.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- dcusbdeviceconnected
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for DeviceConnectionStatus (10 value branches; final `*` is the fallthrough)
+  | case {
+      DeviceConnectionStatus = "1"  | DeviceConnectionStatus := "CONNECTED";
+      DeviceConnectionStatus = "2"  | DeviceConnectionStatus := "FAILED_ENUMERATION";
+      DeviceConnectionStatus = "3"  | DeviceConnectionStatus := "GENERAL_FAILURE";
+      DeviceConnectionStatus = "4"  | DeviceConnectionStatus := "CAUSED_OVER_CURRENT";
+      DeviceConnectionStatus = "5"  | DeviceConnectionStatus := "NOT_ENOUGH_POWER";
+      DeviceConnectionStatus = "6"  | DeviceConnectionStatus := "NOT_ENOUGH_BANDWIDTH";
+      DeviceConnectionStatus = "7"  | DeviceConnectionStatus := "HUB_NESTED_TOO_DEEPLY";
+      DeviceConnectionStatus = "8"  | DeviceConnectionStatus := "IN_LEGACY_HUB";
+      DeviceConnectionStatus = "9"  | DeviceConnectionStatus := "ENUMERATING";
+      DeviceConnectionStatus = "10" | DeviceConnectionStatus := "RESET";
+      *
+  }
+
+  // case {}: enum decoder for DcPolicyAction (3 value branches; final `*` is the fallthrough)
+  | case {
+      DcPolicyAction = "0" | DcPolicyAction := "ALLOW";
+      DcPolicyAction = "1" | DcPolicyAction := "BLOCK";
+      DcPolicyAction = "2" | DcPolicyAction := "MASSSTORAGE";
+      *
+  }
+
+  // bitfield:extractFlagsAsString(): expands DcPolicyFlags (7 flags) into the new field DcPolicyFlags_mask
+  | bitfield:extractFlagsAsString(
+      field="DcPolicyFlags",
+      flagNames=[
+          [0, "SHOW_IN_UI"],
+          [1, "INVASIVE_BLOCK"],
+          [2, "REPORT_ONLY"],
+          [3, "MTP_PTP_RULE"],
+          [4, "ALLOWLIST_RULE"],
+          [5, "ALLOWLIST_DISABLE_VIRTUAL"],
+          [6, "FEATURE_DISABLED"]
+      ],
+      as="DcPolicyFlags_mask",
+      separator=", "
+  )
+
+  // case {}: enum decoder for DcPolicyMassStorageBlockPermissions (4 value branches; final `*` is the fallthrough)
+  | case {
+      DcPolicyMassStorageBlockPermissions = "0" | DcPolicyMassStorageBlockPermissions := "NONE";
+      DcPolicyMassStorageBlockPermissions = "1" | DcPolicyMassStorageBlockPermissions := "READ";
+      DcPolicyMassStorageBlockPermissions = "2" | DcPolicyMassStorageBlockPermissions := "WRITE";
+      DcPolicyMassStorageBlockPermissions = "4" | DcPolicyMassStorageBlockPermissions := "EXECUTE";
+      *
+  }

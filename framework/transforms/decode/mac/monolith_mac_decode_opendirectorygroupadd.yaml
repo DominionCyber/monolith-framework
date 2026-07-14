@@ -1,0 +1,102 @@
+name: monolith_mac_decode_opendirectorygroupadd
+description: Decodes event fields using conditional logic to standardize values across different event sources.
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- opendirectorygroupadd
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for ODErrorCode (63 value branches; final `*` is the fallthrough)
+  | case {
+      ODErrorCode = "0"     | ODErrorCode := "SUCCESS";
+      ODErrorCode = "1000"  | ODErrorCode := "SESSION_LOCAL_ONLY_DAEMON_IN_USE";
+      ODErrorCode = "1001"  | ODErrorCode := "SESSION_NORMAL_DAEMON_IN_USE";
+      ODErrorCode = "1002"  | ODErrorCode := "SESSION_DAEMON_NOT_RUNNING";
+      ODErrorCode = "1003"  | ODErrorCode := "SESSION_DAEMON_REFUSED";
+      ODErrorCode = "1100"  | ODErrorCode := "SESSION_PROXY_COMMUNICATION_ERROR";
+      ODErrorCode = "1101"  | ODErrorCode := "SESSION_PROXY_VERSION_MISMATCH";
+      ODErrorCode = "1102"  | ODErrorCode := "SESSION_PROXY_IP_UNREACHABLE";
+      ODErrorCode = "1103"  | ODErrorCode := "SESSION_PROXY_UNKNOWN_HOST";
+      ODErrorCode = "2000"  | ODErrorCode := "NODE_UNKNOWN_NAME";
+      ODErrorCode = "2001"  | ODErrorCode := "NODE_UNKNOWN_TYPE";
+      ODErrorCode = "2002"  | ODErrorCode := "NODE_DISABLED";
+      ODErrorCode = "2100"  | ODErrorCode := "NODE_CONNECTION_FAILED";
+      ODErrorCode = "2200"  | ODErrorCode := "NODE_UNKNOWN_HOST";
+      ODErrorCode = "3000"  | ODErrorCode := "QUERY_SYNCHRONIZE";
+      ODErrorCode = "3100"  | ODErrorCode := "QUERY_INVALID_MATCH_TYPE";
+      ODErrorCode = "3101"  | ODErrorCode := "QUERY_UNSUPPORTED_MATCH_TYPE";
+      ODErrorCode = "3102"  | ODErrorCode := "QUERY_TIMEOUT";
+      ODErrorCode = "4000"  | ODErrorCode := "RECORD_READ_ONLY_MODE";
+      ODErrorCode = "4001"  | ODErrorCode := "RECORD_PERMISSION_ERROR";
+      ODErrorCode = "4100"  | ODErrorCode := "RECORD_PARAMETER_ERROR";
+      ODErrorCode = "4101"  | ODErrorCode := "RECORD_INVALID_TYPE";
+      ODErrorCode = "4102"  | ODErrorCode := "RECORD_ALREADY_EXISTS";
+      ODErrorCode = "4103"  | ODErrorCode := "RECORD_TYPE_DISABLED";
+      ODErrorCode = "4104"  | ODErrorCode := "RECORD_NO_LONGER_EXISTS";
+      ODErrorCode = "4200"  | ODErrorCode := "RECORD_ATTRIBUTE_UNKNOWN_TYPE";
+      ODErrorCode = "4201"  | ODErrorCode := "RECORD_ATTRIBUTE_NOT_FOUND";
+      ODErrorCode = "4202"  | ODErrorCode := "RECORD_ATTRIBUTE_VALUE_SCHEMA_ERROR";
+      ODErrorCode = "4203"  | ODErrorCode := "RECORD_ATTRIBUTE_VALUE_NOT_FOUND";
+      ODErrorCode = "5000"  | ODErrorCode := "CREDENTIALS_INVALID";
+      ODErrorCode = "5100"  | ODErrorCode := "CREDENTIALS_METHOD_NOT_SUPPORTED";
+      ODErrorCode = "5101"  | ODErrorCode := "CREDENTIALS_NOT_AUTHORIZED";
+      ODErrorCode = "5102"  | ODErrorCode := "CREDENTIALS_PARAMETER_ERROR";
+      ODErrorCode = "5103"  | ODErrorCode := "CREDENTIALS_OPERATION_FAILED";
+      ODErrorCode = "5200"  | ODErrorCode := "CREDENTIALS_SERVER_UNREACHABLE";
+      ODErrorCode = "5201"  | ODErrorCode := "CREDENTIALS_SERVER_NOT_FOUND";
+      ODErrorCode = "5202"  | ODErrorCode := "CREDENTIALS_SERVER_ERROR";
+      ODErrorCode = "5203"  | ODErrorCode := "CREDENTIALS_SERVER_TIMEOUT";
+      ODErrorCode = "5204"  | ODErrorCode := "CREDENTIALS_CONTACT_PRIMARY";
+      ODErrorCode = "5205"  | ODErrorCode := "CREDENTIALS_SERVER_COMMUNICATION_ERROR";
+      ODErrorCode = "5300"  | ODErrorCode := "CREDENTIALS_ACCOUNT_NOT_FOUND";
+      ODErrorCode = "5301"  | ODErrorCode := "CREDENTIALS_ACCOUNT_DISABLED";
+      ODErrorCode = "5302"  | ODErrorCode := "CREDENTIALS_ACCOUNT_EXPIRED";
+      ODErrorCode = "5303"  | ODErrorCode := "CREDENTIALS_ACCOUNT_INACTIVE";
+      ODErrorCode = "5304"  | ODErrorCode := "CREDENTIALS_ACCOUNT_TEMPORARILY_LOCKED";
+      ODErrorCode = "5305"  | ODErrorCode := "CREDENTIALS_ACCOUNT_LOCKED";
+      ODErrorCode = "5400"  | ODErrorCode := "CREDENTIALS_PASSWORD_EXPIRED";
+      ODErrorCode = "5401"  | ODErrorCode := "CREDENTIALS_PASSWORD_CHANGE_REQUIRED";
+      ODErrorCode = "5402"  | ODErrorCode := "CREDENTIALS_PASSWORD_QUALITY_FAILED";
+      ODErrorCode = "5403"  | ODErrorCode := "CREDENTIALS_PASSWORD_TOO_SHORT";
+      ODErrorCode = "5404"  | ODErrorCode := "CREDENTIALS_PASSWORD_TOO_LONG";
+      ODErrorCode = "5405"  | ODErrorCode := "CREDENTIALS_PASSWORD_NEEDS_LETTER";
+      ODErrorCode = "5406"  | ODErrorCode := "CREDENTIALS_PASSWORD_NEEDS_DIGIT";
+      ODErrorCode = "5407"  | ODErrorCode := "CREDENTIALS_PASSWORD_CHANGE_TOO_SOON";
+      ODErrorCode = "5408"  | ODErrorCode := "CREDENTIALS_PASSWORD_PASSWORD_UNRECOVERABLE";
+      ODErrorCode = "5500"  | ODErrorCode := "CREDENTIALS_INVALID_LOGON_HOURS";
+      ODErrorCode = "5501"  | ODErrorCode := "CREDENTIALS_INVALID_COMPUTER";
+      ODErrorCode = "6000"  | ODErrorCode := "POLICY_UNSUPPORTED";
+      ODErrorCode = "6001"  | ODErrorCode := "POLICY_OUT_OF_RANGE";
+      ODErrorCode = "10000" | ODErrorCode := "PLUGIN_OPERATION_NOT_SUPPORTED";
+      ODErrorCode = "10001" | ODErrorCode := "PLUGIN_ERROR";
+      ODErrorCode = "10002" | ODErrorCode := "DAEMON_ERROR";
+      ODErrorCode = "10003" | ODErrorCode := "PLUGIN_OPERATION_TIMEOUT";
+      *
+  }
+
+  // case {}: enum decoder for ODMemberType (3 value branches; final `*` is the fallthrough)
+  | case {
+      ODMemberType = "0" | ODMemberType := "MEMBER_USER_NAME";
+      ODMemberType = "1" | ODMemberType := "MEMBER_USER_UUID";
+      ODMemberType = "2" | ODMemberType := "MEMBER_GROUP_UUID";
+      *
+  }

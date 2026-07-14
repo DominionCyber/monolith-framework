@@ -1,0 +1,71 @@
+name: monolith_mac_decode_sourcecodefilewritten
+description: 'Decodes SourceCodeFileType (46-value enum) on SourceCodeFileWritten events.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- sourcecodefilewritten
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for SourceCodeFileType (46 value branches; final `*` is the fallthrough)
+  | case {
+      SourceCodeFileType = "0"  | SourceCodeFileType := "LANGUAGE_UNKNOWN";
+      SourceCodeFileType = "1"  | SourceCodeFileType := "LANGUAGE_ASSEMBLY";
+      SourceCodeFileType = "2"  | SourceCodeFileType := "LANGUAGE_BATCHFILE";
+      SourceCodeFileType = "3"  | SourceCodeFileType := "LANGUAGE_CSHARP";
+      SourceCodeFileType = "4"  | SourceCodeFileType := "LANGUAGE_C_FAMILY";
+      SourceCodeFileType = "5"  | SourceCodeFileType := "LANGUAGE_CMAKE";
+      SourceCodeFileType = "6"  | SourceCodeFileType := "LANGUAGE_COBOL";
+      SourceCodeFileType = "7"  | SourceCodeFileType := "LANGUAGE_CSS";
+      SourceCodeFileType = "8"  | SourceCodeFileType := "LANGUAGE_CSV";
+      SourceCodeFileType = "9"  | SourceCodeFileType := "LANGUAGE_CLOJURE";
+      SourceCodeFileType = "10" | SourceCodeFileType := "LANGUAGE_COFFEESCRIPT";
+      SourceCodeFileType = "11" | SourceCodeFileType := "LANGUAGE_DM";
+      SourceCodeFileType = "12" | SourceCodeFileType := "LANGUAGE_DART";
+      SourceCodeFileType = "13" | SourceCodeFileType := "LANGUAGE_DOCKERFILE";
+      SourceCodeFileType = "14" | SourceCodeFileType := "LANGUAGE_ELIXIR";
+      SourceCodeFileType = "15" | SourceCodeFileType := "LANGUAGE_ERLANG";
+      SourceCodeFileType = "16" | SourceCodeFileType := "LANGUAGE_FORTRAN";
+      SourceCodeFileType = "17" | SourceCodeFileType := "LANGUAGE_GO";
+      SourceCodeFileType = "18" | SourceCodeFileType := "LANGUAGE_HASKELL";
+      SourceCodeFileType = "19" | SourceCodeFileType := "LANGUAGE_JSON";
+      SourceCodeFileType = "20" | SourceCodeFileType := "LANGUAGE_JAVA_FAMILY";
+      SourceCodeFileType = "21" | SourceCodeFileType := "LANGUAGE_JAVASCRIPT_FAMILY";
+      SourceCodeFileType = "22" | SourceCodeFileType := "LANGUAGE_JULIA";
+      SourceCodeFileType = "23" | SourceCodeFileType := "LANGUAGE_KOTLIN";
+      SourceCodeFileType = "24" | SourceCodeFileType := "LANGUAGE_LISP";
+      SourceCodeFileType = "25" | SourceCodeFileType := "LANGUAGE_MAKEFILE";
+      SourceCodeFileType = "26" | SourceCodeFileType := "LANGUAGE_MATLAB";
+      SourceCodeFileType = "27" | SourceCodeFileType := "LANGUAGE_NATURAL_LANGUAGE";
+      SourceCodeFileType = "28" | SourceCodeFileType := "LANGUAGE_OCAML";
+      SourceCodeFileType = "29" | SourceCodeFileType := "LANGUAGE_PHP";
+      SourceCodeFileType = "30" | SourceCodeFileType := "LANGUAGE_PASCAL";
+      SourceCodeFileType = "31" | SourceCodeFileType := "LANGUAGE_PERL";
+      SourceCodeFileType = "32" | SourceCodeFileType := "LANGUAGE_PYTHON";
+      SourceCodeFileType = "33" | SourceCodeFileType := "LANGUAGE_R";
+      SourceCodeFileType = "34" | SourceCodeFileType := "LANGUAGE_RUBY";
+      SourceCodeFileType = "35" | SourceCodeFileType := "LANGUAGE_RUST";
+      SourceCodeFileType = "36" | SourceCodeFileType := "LANGUAGE_SQL";
+      SourceCodeFileType = "37" | SourceCodeFileType := "LANGUAGE_SCALA";
+      SourceCodeFileType = "38" | SourceCodeFileType := "LANGUAGE_SHELL";
+      SourceCodeFileType = "39" | SourceCodeFileType := "LANGUAGE_SWIFT";
+      SourceCodeFileType = "40" | SourceCodeFileType := "LANGUAGE_TOML";
+      SourceCodeFileType = "41" | SourceCodeFileType := "LANGUAGE_TEX";
+      SourceCodeFileType = "42" | SourceCodeFileType := "LANGUAGE_VERILOG";
+      SourceCodeFileType = "43" | SourceCodeFileType := "LANGUAGE_VISUAL_BASIC";
+      SourceCodeFileType = "44" | SourceCodeFileType := "LANGUAGE_XML";
+      SourceCodeFileType = "45" | SourceCodeFileType := "LANGUAGE_YAML";
+      *
+  }

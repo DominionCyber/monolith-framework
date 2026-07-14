@@ -1,0 +1,182 @@
+name: monolith_mac_match_processrollup2_newscriptwritten
+description: Joins NewScriptWritten events with ProcessRollup2 events, surfacing new script writes enriched with the responsible process context. The match key is the process UPID (falconPID on NewScriptWritten, derived from ContextProcessId = TargetProcessId on PR2).
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- match
+- processrollup2
+- newscriptwritten
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ L1 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Builds a lookup table of ProcessRollup2 events on Mac, keyed by TargetProcessId (the process the event describes)
+  defineTable(
+      query={
+        #event_simpleName=ProcessRollup2 event_platform=Mac
+        | $monolith_convert_file_extension()    // Parses FileName into FileExtension before extraction
+        | $monolith_convert_uid()               // Adds UID_readable sibling before extraction
+        | $monolith_convert_gid()               // Adds GID_readable sibling before extraction
+        | $monolith_mac_decode_processrollup2() // Decodes MachOSubType (8 vals) and CodeSigningFlags (27-bit mask)
+        | ContextSHA256HashData := SHA256HashData   // Rename to prevent collision with L2's SHA256HashData (the action-specific hash)
+      },
+      name=processes,
+      include=[
+          // ▰▰▰[ Match Key ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetProcessId,         // UPID of the process; joins to NewScriptWritten.falconPID
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,            // Endpoint hostname (envelope; same on both events)
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                // OS account that owns the writing process
+          UID,                     // Effective UID
+          UID_readable,            // Human-readable UID label (from convert_uid helper)
+          GID,                     // Effective GID
+          GID_readable,            // Human-readable GID label (from convert_gid helper)
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ParentBaseFileName,      // Basename of the parent binary
+          ContextBaseFileName,     // Basename of the actor process binary
+          RawProcessId,            // OS-level PID of the writing process
+          // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          FilePath,                // Directory portion of the process binary path (from ImageFileName parser)
+          FileName,                // Basename of the process binary
+          FileExtension,           // Last extension of the process binary; "(none)" for most binaries
+          ContextSHA256HashData,   // SHA-256 of the process binary (renamed from SHA256HashData to avoid L2 collision)
+          // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          CommandLine              // Full command line of the actor process
+      ]
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Pulls NewScriptWritten events to be enriched with process context from L1
+  | #event_simpleName=NewScriptWritten event_platform=Mac
+  | $monolith_utility_falcon_pid()              // Translates ContextProcessId into falconPID (this event lacks TargetProcessId natively)
+
+  // ▰▰▰▰▰▰[ MATCH STATEMENT ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Inner join: keep only L2 events whose falconPID matches a TargetProcessId in the processes table
+  | match(
+      table=processes,
+      field=falconPID,                          // L2-side UPID (derived from ContextProcessId by helper)
+      column=TargetProcessId                    // L1-side UPID (PR2's TargetProcessId)
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Enrichment for the L2 side (applied after the match so PR2 fields are also in scope)
+  | $monolith_convert_time_utc()                // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()           // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_size()               // Coalesces Size into ByteSize/CommonSize (human-readable size)
+  | $monolith_convert_removable_disk()          // Rewrites IsOnRemovableDisk 0/1 → No/Yes in place
+  | $monolith_mac_decode_newscriptwritten()       // Event-specific enum/bitmask decoder
+
+  // ▰▰▰▰▰▰[ GROUP BY LOGIC ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Collapses many joined rows into one row per group key, with all related fields collected
+  | groupBy(
+      [
+          aid,                         // Falcon agent ID; uniquely identifies the host
+          SHA256HashData,              // SHA-256 of the WRITTEN file (L2-side, post-rename of L1's hash); the analytical unit
+          FileIdentifier               // Sensor-side file identifier for the written file
+      ],
+      function=[
+          collect([
+              // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              utc_time,                    // Human-readable UTC event time (from helper)
+              // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ComputerName,                // Endpoint hostname (from L1)
+              // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              UserName,                    // OS account owning the actor process (from L1)
+              UID,                         // Effective UID (from L1)
+              UID_readable,                // Human-readable UID (from L1 helper)
+              GID,                         // Effective GID (from L1)
+              GID_readable,                // Human-readable GID (from L1 helper)
+              // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              TargetProcessId,             // UPID of the actor process (from L1)
+              RawProcessId,                // OS-level PID (from L1)
+              ParentBaseFileName,          // Basename of the parent binary (from L1)
+              ContextBaseFileName,         // Basename of the actor process binary (from L1)
+              // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              FilePath,                    // Directory of the actor process binary (from L1)
+              FileName,                    // Basename of the actor process binary (from L1)
+              FileExtension,               // Extension of the actor process binary (from L1)
+              ContextSHA256HashData,       // SHA-256 of the actor process binary (from L1, renamed)
+              // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              CommandLine,                 // Full command line of the actor process (from L1)
+              // ▰▰▰[ Time (L2) ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ContextTimeStamp,            // Raw event time on host (from L2)
+              // ▰▰▰[ Written File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              TargetFileName,              // Full path of the written new script (raw, unparsed)
+              FileSourcePath,              // Source path the file came from (Mac-specific)
+              FileCategory,                // Content category (decoded: ARCHIVES, EXECUTABLE_FILES, OFFICE_DOCUMENTS, ...)
+              FileIdentifier,              // Sensor-side file identifier
+              SHA256HashData,              // SHA-256 of the written new script (L2-side; the analytical unit)
+              // ▰▰▰[ File Properties ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              Size,                        // Written file size in bytes
+              CommonSize,                  // Human-readable size (from convert_file_size helper)
+              IsOnRemovableDisk,           // Drive type: Yes or No (converted in place)
+              // ▰▰▰[ Volume ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              DiskParentDeviceInstanceId,  // Physical device identifier
+              VolumeSessionUUID,           // Volume session correlation identifier
+              MipInformation,              // Microsoft Information Protection label data
+              // ▰▰▰[ Container / Correlation ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              OciContainerId,              // Container ID if written inside a container
+              EventCorrelationId           // Correlation ID linking related script-write events
+          ])
+      ],
+      limit=max
+  )
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Final analyst view: one row per group key with full collected context for triage
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                    // Human-readable UTC event time (from helper)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                // Endpoint hostname (from L1)
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                    // OS account owning the actor process (from L1)
+          UID,                         // Effective UID (from L1)
+          UID_readable,                // Human-readable UID (from L1 helper)
+          GID,                         // Effective GID (from L1)
+          GID_readable,                // Human-readable GID (from L1 helper)
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetProcessId,             // UPID of the actor process (from L1)
+          RawProcessId,                // OS-level PID (from L1)
+          ParentBaseFileName,          // Basename of the parent binary (from L1)
+          ContextBaseFileName,         // Basename of the actor process binary (from L1)
+          // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          FilePath,                    // Directory of the actor process binary (from L1)
+          FileName,                    // Basename of the actor process binary (from L1)
+          FileExtension,               // Extension of the actor process binary (from L1)
+          ContextSHA256HashData,       // SHA-256 of the actor process binary (from L1, renamed)
+          // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          CommandLine,                 // Full command line of the actor process (from L1)
+          // ▰▰▰[ Time (L2) ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextTimeStamp,            // Raw event time on host (from L2)
+          // ▰▰▰[ Written File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,              // Full path of the written new script (raw, unparsed)
+          FileSourcePath,              // Source path the file came from (Mac-specific)
+          FileCategory,                // Content category (decoded: ARCHIVES, EXECUTABLE_FILES, OFFICE_DOCUMENTS, ...)
+          FileIdentifier,              // Sensor-side file identifier
+          SHA256HashData,              // SHA-256 of the written new script (L2-side; the analytical unit)
+          // ▰▰▰[ File Properties ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          Size,                        // Written file size in bytes
+          CommonSize,                  // Human-readable size (from convert_file_size helper)
+          IsOnRemovableDisk,           // Drive type: Yes or No (converted in place)
+          // ▰▰▰[ Volume ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DiskParentDeviceInstanceId,  // Physical device identifier
+          VolumeSessionUUID,           // Volume session correlation identifier
+          MipInformation,              // Microsoft Information Protection label data
+          // ▰▰▰[ Container / Correlation ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          OciContainerId,              // Container ID if written inside a container
+          EventCorrelationId           // Correlation ID linking related script-write events
+      ],
+      limit=max
+  )

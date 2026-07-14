@@ -1,0 +1,57 @@
+name: monolith_mac_base_applescriptfilewritten
+description: Base query for AppleScriptFileWritten events. Decodes file-write metadata for AppleScript content.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- applescriptfilewritten
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=AppleScriptFileWritten event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                   // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()              // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_size()                  // Computes CommonSize: byte size in human-readable form (TB/GB/MB/KB)
+  | $monolith_mac_decode_applescriptfilewritten()  // Decodes the FileCategory enum into readable strings (OTHER, EXECUTABLE_FILES, ...)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,             // Human-readable UTC event time (from helper)
+          ContextTimeStamp,     // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,         // Endpoint hostname
+          aid,                  // Falcon agent ID; primary host key
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,             // User who wrote the file
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,     // UPID of the writing process; joins to ProcessRollup2
+          ContextThreadId,      // Thread ID within the writing process
+          TreeId,               // Process tree ID; groups related events
+          // ▰▰▰[ File Details ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,       // Full path of the AppleScript written
+          FilePath,             // Directory portion of TargetFileName (parser-derived)
+          FileName,             // Basename portion of TargetFileName (parser-derived)
+          Size,                 // File size in bytes
+          CommonSize,           // File size, human-readable (from convert_file_size helper)
+          FileIdentifier,       // Sensor-assigned unique file ID
+          FileCategory,         // Falcon file classification (decoded by decode helper)
+          SHA256HashData,       // SHA-256 of the file (when computed)
+          IsOnRemovableDisk,    // 1 if written to USB/external media
+          FileSourcePath        // Original path if file was copied/moved
+      ],
+      limit=max
+  )

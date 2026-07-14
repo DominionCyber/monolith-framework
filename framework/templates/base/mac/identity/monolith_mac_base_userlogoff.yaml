@@ -1,0 +1,63 @@
+name: monolith_mac_base_userlogoff
+description: 'Base query for UserLogoff events. Decodes session-end metadata including session timing, user identity, logon type, and group memberships.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- userlogoff
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=UserLogoff event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()      // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper() // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_userlogoff() // Decodes UserLogoffType (bitmask, 4 flags -> UserLogoffType_mask), LogonType (12 vals), AuthenticationId (5 vals), UserLogonFlags (bitmask, 6 flags -> UserLogonFlags_mask), UserGroupsBitmask (bitmask, 30 flags -> UserGroupsBitmask_mask) in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,         // Human-readable UTC event time (from helper)
+          ContextTimeStamp, // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName, // Endpoint hostname
+          aid,          // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId, // UPID of the process triggering the logoff (usually a login window or session manager)
+          RawProcessId,     // Native OS process ID (PID) for cross-reference
+          // ▰▰▰[ Session Timing ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          LogonTime,      // When the session started (epoch seconds)
+          LogoffTime,     // When the session ended (epoch seconds); compare to LogonTime for duration
+          AuditSessionId, // OS session ID for grouping events within one session
+          // ▰▰▰[ Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,         // Username being logged off
+          UID,              // POSIX UID of the user
+          UserSid,          // MacOS Security Identifier (sentinel-only on Mac; not decoded)
+          UserPrincipal,    // Principal name (e.g. user@DOMAIN.COM for AD-bound Macs)
+          LogonDomain,      // Domain the user authenticated to (may be null for local accounts)
+          MachineDomain,    // Domain the host is joined to (may be null for non-bound Macs)
+          PasswordLastSet,  // When the user last changed their password (epoch)
+          AuthenticationId, // Authentication mechanism (decoded; 5 values)
+          // ▰▰▰[ Session Properties ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          LogonType,              // Session type at logon (decoded; 12 values: INTERACTIVE, NETWORK, REMOTE_INTERACTIVE, ...)
+          UserLogoffType,         // How the logoff happened (decoded bitmask; 4 flags)
+          UserLogonFlags,         // Session flags at logon (decoded bitmask; 6 flags)
+          UserLogonFlags_mask,    // Human-readable flag list from bitfield helper
+          UserGroupsBitmask,      // Group memberships (decoded bitmask; 30 flags including ADMIN, GUEST, WHEEL, ...)
+          UserGroupsBitmask_mask, // Human-readable group list from bitfield helper
+          UserIsAdmin             // Boolean: was the user an administrator? (0/1)
+      ],
+      limit=max
+  )

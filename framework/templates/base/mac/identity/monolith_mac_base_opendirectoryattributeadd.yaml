@@ -1,0 +1,49 @@
+name: monolith_mac_base_opendirectoryattributeadd
+description: Base query for OpenDirectoryAttributeAdd events. Decodes macOS OpenDirectory attribute addition activity.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- opendirectoryattributeadd
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=OpenDirectoryAttributeAdd event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                          // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()                     // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_opendirectoryattributeadd()      // Decodes ODErrorCode (65 values) and ODRecordType (USER/GROUP)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,           // Human-readable UTC event time (from helper)
+          ContextTimeStamp,   // Raw event time on host (epoch + ms); no readable conversion yet
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,       // Endpoint hostname
+          aid,                // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,   // UPID of the process that performed the OD operation; joins to ProcessRollup2
+          // ▰▰▰[ Open Directory Operation ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ODNodeName,         // OD node where the operation occurred (e.g. /Local/Default for local accounts, /LDAPv3/... for directory services)
+          ODDatabasePath,     // On-disk path to the OD database (e.g. /var/db/dslocal/nodes/Default for local accounts)
+          ODRecordType,       // Record type being modified (decoded: RECORD_TYPE_USER or RECORD_TYPE_GROUP)
+          ODRecordName,       // Name of the record being modified (e.g. LocalAdmin, jsmith)
+          ODAttributeName,    // Attribute being added (e.g. dsAttrTypeNative:unlockOptions, dsAttrTypeStandard:UserShell)
+          ODAttributeValues,  // New value(s) being assigned to the attribute (structured JSON: {"_name":"...","od_attribute_values":[...]})
+          ODErrorCode         // Operation result (decoded: SUCCESS, RECORD_PERMISSION_ERROR, CREDENTIALS_INVALID, ... 65 known values)
+      ],
+      limit=max
+  )

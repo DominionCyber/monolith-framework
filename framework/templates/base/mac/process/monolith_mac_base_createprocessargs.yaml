@@ -1,0 +1,49 @@
+name: monolith_mac_base_createprocessargs
+description: Base query for CreateProcessArgs events. Decode transform pending; raw process-argument metadata surfaced.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- createprocessargs
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=CreateProcessArgs event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()         // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()    // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_extension()   // Parses FileName into FileExtension (e.g. exe, sh, py); "(none)" if absent
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,          // Human-readable UTC event time (from helper)
+          ContextTimeStamp,  // Raw event time on host (epoch + ms); no readable conversion yet
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,      // Endpoint hostname
+          aid,               // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,  // UPID of the newly-created process; joins to ProcessRollup2 for full process metadata
+          ContextThreadId,   // UTID of the thread emitting the event (often equals ContextProcessId at process creation)
+          TreeId,            // Process tree ID; groups related events
+          // ▰▰▰[ Process Args ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,    // Full path of the binary being executed
+          FilePath,          // Directory portion of TargetFileName (parser-derived)
+          FileName,          // Basename portion of TargetFileName (parser-derived)
+          FileExtension,     // Last extension of FileName (from helper); "(none)" if absent
+          CommandLine        // Full command line passed to the new process (may be empty or truncated per dictionary)
+      ],
+      limit=max
+  )

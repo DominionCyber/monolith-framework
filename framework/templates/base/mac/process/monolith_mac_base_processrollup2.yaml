@@ -1,0 +1,88 @@
+name: monolith_mac_base_processrollup2
+description: Base query for ProcessRollup2 events. Decodes process execution data on macOS.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- processrollup2
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=ProcessRollup2 event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                    // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()               // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_coalesce_processrollup2()       // Mac PR2 coalesce (was incorrectly the Windows helper)
+  | $monolith_convert_file_extension()              // Parses FileName into FileExtension; "(none)" if absent
+  | $monolith_convert_uid()                         // Adds UID_readable sibling
+  | $monolith_convert_gid()                         // Adds GID_readable sibling
+  | $monolith_mac_decode_processrollup2()           // Decodes MachOSubType (8 values) and CodeSigningFlags (27-bit bitmask → CodeSigningFlags_mask)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                    // Human-readable UTC event time (from helper)
+          ProcessStartTime,            // Process start time (epoch + ms)
+          ProcessEndTime,              // Process end time (epoch + ms); empty for still-running processes
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                // Endpoint hostname
+          aid,                         // Falcon agent ID; primary host key
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                    // OS account that owns the process
+          UID,                         // Effective UID (POSIX)
+          UID_readable,                // Human-readable UID label (from convert_uid helper)
+          RUID,                        // Real UID
+          SVUID,                       // Saved UID (after setuid)
+          GID,                         // Effective GID
+          GID_readable,                // Human-readable GID label (from convert_gid helper)
+          RGID,                        // Real GID
+          SVGID,                       // Saved GID
+          // ▰▰▰[ Process Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetProcessId,             // UPID of this process; primary join key
+          RawProcessId,                // OS-level PID (small integer); not unique across reboots
+          SourceProcessId,             // UPID that spawned this process (parent's UPID at fork)
+          ParentProcessId,             // UPID of the parent process at the moment of this event
+          ResponsiblePid,              // UPID of the responsible process (Mac-specific; user-facing actor)
+          SubmittedByPid,              // UPID of the process that submitted/queued this one (XPC services)
+          SessionProcessId,            // UPID of the session leader
+          ProcessGroupId,              // UPID of the process group leader
+          TreeId,                      // Process tree ID; groups related events
+          SourceThreadId,              // UTID of the thread that performed the fork/exec
+          // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ImageFileName,               // Full path of the executed binary
+          FilePath,                    // Directory portion (parser-derived)
+          FileName,                    // Basename portion (parser-derived)
+          FileExtension,               // Last extension of FileName (from helper); "(none)" for most macOS binaries
+          ParentBaseFileName,          // Basename of the parent's binary (e.g. launchd, bash, Finder)
+          MachOSubType,                // Binary type (decoded: EXECUTABLE64, DYLIB64, BUNDLE64, KEXT64, ...)
+          SHA256HashData,              // SHA-256 of the binary
+          SHA1HashData,                // SHA-1 of the binary (sensor emits all-zeros sentinel when not computed)
+          MD5HashData,                 // MD5 of the binary
+          // ▰▰▰[ Code Signing ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          SigningId,                   // Code signing identifier (e.g. com.duosecurity.duoappupdater)
+          TeamId,                      // Apple Developer Team ID (e.g. FNN8Z5JMFP for Duo Security)
+          CodeSigningFlags,            // Raw bitmask of CS_* flags
+          CodeSigningFlags_mask,       // Decoded CS_* flag names (from helper: CS_VALID, CS_HARD, CS_RUNTIME, ...)
+          ProcessEntitlements,         // Apple sandbox/security entitlements granted to the process
+          // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          CommandLine,                 // Full command line of the process (may be empty or truncated)
+          EnvironmentVariablesString,  // Environment variables at exec time (space-separated KEY=VALUE)
+          TtyName,                     // Controlling terminal (e.g. /dev/ttys000); empty for non-interactive processes
+          // ▰▰▰[ Persistence & Tags ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ASEPFilePath,                // Auto-Start Extensibility Point path (LaunchDaemon/LaunchAgent plist) if launched via persistence
+          Tags                         // Comma-separated CrowdStrike-side classification tags
+      ],
+      limit=max
+  )

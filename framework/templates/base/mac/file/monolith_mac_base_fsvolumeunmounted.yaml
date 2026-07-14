@@ -1,0 +1,43 @@
+name: monolith_mac_base_fsvolumeunmounted
+description: Base query for FsVolumeUnmounted events. Decode transform pending; raw unmount metadata surfaced.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- fsvolumeunmounted
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=FsVolumeUnmounted event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()
+  | $monolith_utility_falcon_helper()
+  // [CONSIDERATION] $monolith_mac_decode_fsvolumeunmounted() does not exist in the framework yet. Author it from the Falcon dictionary entry, including any bitfields and enums, before this base feeds match-cradles.
+  | $monolith_mac_decode_fsvolumeunmounted()
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          utc_time,
+          ComputerName,
+          UserName,
+          ContextBaseFileName,
+          VolumeName,
+          VolumeMountPoint,
+          VolumeFileSystemType,
+          VolumeUUID,
+          VolumeBSDName
+      ],
+      limit=max
+  )

@@ -1,0 +1,57 @@
+name: monolith_mac_base_asepfilechangedetectinfo
+description: 'Base query for AsepFileChangeDetectInfo events on Mac. Surfaces ASEP (Auto-Start Extensibility Point) file-change telemetry with decoded VnodeModificationType. Fires when files matching CrowdStrike-curated ASEP patterns (LaunchAgents, LaunchDaemons, login items, kernel extensions, dyld insert lists) are modified. PatternId and TemplateInstanceId identify which persistence mechanism was affected. NO SAMPLE DATA - built from Falcon dictionary schema only.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- asepfilechangedetectinfo
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=AsepFileChangeDetectInfo event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                     // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()                // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_size()                    // Coalesces Size into ByteSize/CommonSize (human-readable size)
+  | $monolith_mac_decode_asepfilechangedetectinfo()  // Decodes VnodeModificationType (26 enum values: CREATE, WRITE, UNLINK, RENAME_FROM, RENAME_TO, ...) in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,              // Human-readable UTC event time (from helper)
+          ContextTimeStamp,      // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,          // Endpoint hostname
+          aid,                   // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,      // UPID of the modifying process; joins to ProcessRollup2 for actor attribution
+          ContextThreadId,       // UTID of the modifying thread; typically 0 (sentinel) for kernel-level events
+          TreeId,                // Process tree ID; groups related events
+          // ▰▰▰[ ASEP Pattern Match ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          PatternId,             // CrowdStrike pattern ID that matched this file change (identifies WHICH ASEP triggered)
+          TemplateInstanceId,    // Template instance ID (additional pattern correlation)
+          // ▰▰▰[ Modified File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,        // Full path of the ASEP-matching file that changed
+          FilePath,              // Directory portion (parser-derived from TargetFileName)
+          FileName,              // Basename portion (parser-derived from TargetFileName)
+          VnodeModificationType, // What changed about the file (decoded: CREATE, WRITE, UNLINK, RENAME_FROM, RENAME_TO, SET_MODE, ...; 26 values)
+          // ▰▰▰[ File Content ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          FileContent,           // Snapshot of file content at change time (may be truncated; valuable for plist/script inspection)
+          Size,                  // File size in bytes
+          CommonSize,             // Human-readable size (from helper: e.g. "1.2 KB")
+          SHA256HashData         // SHA-256 of the file at change time (sentinel values for not-computed NOT decoded per framework rule)
+      ],
+      limit=max
+  )

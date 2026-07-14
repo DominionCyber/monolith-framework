@@ -1,0 +1,72 @@
+name: monolith_mac_decode_dcremovablestoragedeviceconnected
+description: 'Decodes DcRemovableStorageType (3-value enum), DcPolicyAction (3-value enum), DcPolicyFlags (8-flag bitmask), DcPolicyMassStorageBlockPermissions (4-value enum), and DcBusType (6-value enum) on DcRemovableStorageDeviceConnected events.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- dcremovablestoragedeviceconnected
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for DcRemovableStorageType (3 value branches; final `*` is the fallthrough)
+  | case {
+      DcRemovableStorageType = "0" | DcRemovableStorageType := "UNKNOWN";
+      DcRemovableStorageType = "1" | DcRemovableStorageType := "SDCARD";
+      DcRemovableStorageType = "2" | DcRemovableStorageType := "GENERIC";
+      *
+  }
+
+  // case {}: enum decoder for DcPolicyAction (3 value branches; final `*` is the fallthrough)
+  | case {
+      DcPolicyAction = "0" | DcPolicyAction := "ALLOW";
+      DcPolicyAction = "1" | DcPolicyAction := "BLOCK";
+      DcPolicyAction = "2" | DcPolicyAction := "MASSSTORAGE";
+      *
+  }
+
+  // bitfield:extractFlagsAsString(): expands DcPolicyFlags (7 flags) into the new field DcPolicyFlags_mask
+  | bitfield:extractFlagsAsString(
+      field="DcPolicyFlags",
+      flagNames=[
+          [0, "SHOW_IN_UI"],
+          [1, "INVASIVE_BLOCK"],
+          [2, "REPORT_ONLY"],
+          [3, "MTP_PTP_RULE"],
+          [4, "ALLOWLIST_RULE"],
+          [5, "ALLOWLIST_DISABLE_VIRTUAL"],
+          [6, "FEATURE_DISABLED"]
+      ],
+      as="DcPolicyFlags_mask",
+      separator=", "
+  )
+
+  // case {}: enum decoder for DcPolicyMassStorageBlockPermissions (4 value branches; final `*` is the fallthrough)
+  | case {
+      DcPolicyMassStorageBlockPermissions = "0" | DcPolicyMassStorageBlockPermissions := "NONE";
+      DcPolicyMassStorageBlockPermissions = "1" | DcPolicyMassStorageBlockPermissions := "READ";
+      DcPolicyMassStorageBlockPermissions = "2" | DcPolicyMassStorageBlockPermissions := "WRITE";
+      DcPolicyMassStorageBlockPermissions = "4" | DcPolicyMassStorageBlockPermissions := "EXECUTE";
+      *
+  }
+
+  // case {}: enum decoder for DcBusType (6 value branches; final `*` is the fallthrough)
+  | case {
+      DcBusType = "0" | DcBusType := "INVALID";
+      DcBusType = "1" | DcBusType := "USB";
+      DcBusType = "2" | DcBusType := "PCI";
+      DcBusType = "3" | DcBusType := "THUNDERBOLT";
+      DcBusType = "4" | DcBusType := "SECURE_DIGITAL";
+      DcBusType = "5" | DcBusType := "STORAGE_SPACE";
+      *
+  }

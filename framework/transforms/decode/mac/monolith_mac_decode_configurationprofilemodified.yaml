@@ -1,0 +1,41 @@
+name: monolith_mac_decode_configurationprofilemodified
+description: Decodes event fields using conditional logic to standardize values across different event sources.
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- configurationprofilemodified
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for ProfileModificationType (3 value branches; final `*` is the fallthrough)
+  | case {
+      ProfileModificationType = "0" | ProfileModificationType := "ADDED";
+      ProfileModificationType = "1" | ProfileModificationType := "MODIFIED";
+      ProfileModificationType = "2" | ProfileModificationType := "REMOVED";
+      *
+  }
+
+  // case {}: enum decoder for ProfileSource (2 value branches; final `*` is the fallthrough)
+  | case {
+      ProfileSource = "0" | ProfileSource := "SOURCE_MANAGED";
+      ProfileSource = "1" | ProfileSource := "SOURCE_MANUAL";
+      *
+  }

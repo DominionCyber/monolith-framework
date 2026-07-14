@@ -1,0 +1,62 @@
+name: monolith_convert_unix_posix_mode
+description: 'Decomposes a numeric Unix mode (e.g. 0o755) into rwx-style owner/group/other permission strings. Outputs OwnerPerms, GroupPerms, OtherPerms.'
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- convert
+- file_permissions
+- posix
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ CONVERSION ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | format("%o", field=UnixMode, as=UnixMode_octal)                                   // format("%o"): decimal -> octal text representation
+  | _len := text:length(UnixMode_octal)                                               // text:length(): count characters; we slice from the END for safety
+  | _owner_digit := text:substring(UnixMode_octal, begin=_len-3, end=_len-2)          // 3rd-from-last char = owner digit
+  | _group_digit := text:substring(UnixMode_octal, begin=_len-2, end=_len-1)          // 2nd-from-last char = group digit
+  | _other_digit := text:substring(UnixMode_octal, begin=_len-1, end=_len)            // last char = other digit
+  | case {                                                                            // case {}: owner-bits -> rwx string
+      _owner_digit = "7" | OwnerPerms := "rwx";                                       //   7 = read+write+execute
+      _owner_digit = "6" | OwnerPerms := "rw-";                                       //   6 = read+write
+      _owner_digit = "5" | OwnerPerms := "r-x";                                       //   5 = read+execute
+      _owner_digit = "4" | OwnerPerms := "r--";                                       //   4 = read only
+      _owner_digit = "3" | OwnerPerms := "-wx";                                       //   3 = write+execute (unusual)
+      _owner_digit = "2" | OwnerPerms := "-w-";                                       //   2 = write only (very unusual)
+      _owner_digit = "1" | OwnerPerms := "--x";                                       //   1 = execute only
+      *                  | OwnerPerms := "---";                                       //   0 = no permissions
+  }
+  | case {                                                                            // case {}: group-bits -> rwx string (same mapping)
+      _group_digit = "7" | GroupPerms := "rwx";
+      _group_digit = "6" | GroupPerms := "rw-";
+      _group_digit = "5" | GroupPerms := "r-x";
+      _group_digit = "4" | GroupPerms := "r--";
+      _group_digit = "3" | GroupPerms := "-wx";
+      _group_digit = "2" | GroupPerms := "-w-";
+      _group_digit = "1" | GroupPerms := "--x";
+      *                  | GroupPerms := "---";
+  }
+  | case {                                                                            // case {}: other-bits -> rwx string (same mapping)
+      _other_digit = "7" | OtherPerms := "rwx";
+      _other_digit = "6" | OtherPerms := "rw-";
+      _other_digit = "5" | OtherPerms := "r-x";
+      _other_digit = "4" | OtherPerms := "r--";
+      _other_digit = "3" | OtherPerms := "-wx";
+      _other_digit = "2" | OtherPerms := "-w-";
+      _other_digit = "1" | OtherPerms := "--x";
+      *                  | OtherPerms := "---";
+  }

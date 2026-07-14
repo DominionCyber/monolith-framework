@@ -1,0 +1,56 @@
+name: monolith_mac_base_moduledetectinfo
+description: 'Base query for ModuleDetectInfo events on Mac. Surfaces Falcon module-load detections with target process, module identity, detection pattern, and disposition. Each fire indicates the sensor flagged a module load as notable.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- moduledetectinfo
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=ModuleDetectInfo event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()            // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()       // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_moduledetectinfo() // Decodes ModuleLoadMechanism and TemplateDisposition in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                // Human-readable UTC event time (from helper)
+          ContextTimeStamp,        // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,            // Endpoint hostname
+          aid,                     // Falcon agent ID; primary host key
+          // ▰▰▰[ Target Process ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetProcessId,         // UPID of the process loading the detected module; joins to ProcessRollup2
+          // ▰▰▰[ Detected Module ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,          // Full path of the detected module
+          SHA256HashData,          // SHA-256 of the detected module (sentinel values NOT decoded per framework rule)
+          MD5HashData,             // MD5 of the detected module
+          ModuleLoadMechanism,     // How the module was loaded (decoded; 2 values: NORMAL, REFLECTIVE)
+          // ▰▰▰[ Reflective Load Details ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ReflectivePeEntryRva,    // Relative virtual address of the entry point for reflectively-loaded PE modules
+          ReflectivePeTimestamp,   // Timestamp from the PE header of reflectively-loaded modules
+          // ▰▰▰[ Detection ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          PatternId,               // CrowdStrike pattern ID that matched
+          TemplateDisposition,     // Detection disposition (decoded; 10 values)
+          TemplateInstanceId,      // Specific template instance ID
+          TemplateInstanceVersion, // Version of the template instance
+          // ▰▰▰[ Correlation ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          EventCorrelationId      // Correlation ID linking this detection to related events
+      ],
+      limit=max
+  )

@@ -1,0 +1,96 @@
+name: monolith_mac_decode_userlogon
+description: Decodes event fields using conditional logic to standardize values across different event sources.
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- userlogon
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for LogonType (12 value branches; final `*` is the fallthrough)
+  | case {
+      LogonType = "2"  | LogonType := "INTERACTIVE";
+      LogonType = "3"  | LogonType := "NETWORK";
+      LogonType = "4"  | LogonType := "BATCH";
+      LogonType = "5"  | LogonType := "SERVICE";
+      LogonType = "6"  | LogonType := "PROXY";
+      LogonType = "7"  | LogonType := "UNLOCK";
+      LogonType = "8"  | LogonType := "NETWORK_CLEARTEXT";
+      LogonType = "9"  | LogonType := "NEW_CREDENTIALS";
+      LogonType = "10" | LogonType := "REMOTE_INTERACTIVE";
+      LogonType = "11" | LogonType := "CACHED_INTERACTIVE";
+      LogonType = "12" | LogonType := "CACHED_REMOTE_INTERACTIVE";
+      LogonType = "13" | LogonType := "CACHED_UNLOCK";
+      *
+  }
+
+  // bitfield:extractFlagsAsString(): expands UserLogonFlags (5 flags) into the new field UserLogonFlags_mask
+  | bitfield:extractFlagsAsString(
+      field="UserLogonFlags",
+      flagNames=[
+          [0, "LOGON_IS_SYNTHETIC"],
+          [1, "USER_IS_ADMIN"],
+          [2, "USER_IS_LOCAL"],
+          [3, "USER_IS_BUILT_IN"],
+          [4, "USER_IDENTITY_MISSING"]
+      ],
+      as="UserLogonFlags_mask",
+      separator=", "
+  )
+
+  // bitfield:extractFlagsAsString(): expands UserGroupsBitmask (30 flags) into the new field UserGroupsBitmask_mask
+  | bitfield:extractFlagsAsString(
+      field="UserGroupsBitmask",
+      flagNames=[
+          [0,  "GROUP_BUILTIN_ADMINISTRATOR"],
+          [1,  "GROUP_BUILTIN_POWERUSER"],
+          [2,  "GROUP_BUILTIN_REMOTE_MANAGEMENT"],
+          [3,  "GROUP_BUILTIN_DCOM"],
+          [4,  "GROUP_BUILTIN_NET_OPS"],
+          [5,  "GROUP_BUILTIN_BACKUP_OPS"],
+          [6,  "GROUP_BUILTIN_ACCOUNT_OPS"],
+          [7,  "GROUP_BUILTIN_USERS"],
+          [8,  "GROUP_BUILTIN_PERF_MONITOR"],
+          [9,  "GROUP_BUILTIN_PERF_LOG"],
+          [10, "GROUP_BUILTIN_GUESTS"],
+          [11, "GROUP_NT_AUTH_BATCH"],
+          [12, "GROUP_NT_AUTH_NETWORK"],
+          [13, "GROUP_NT_AUTH_SERVICE"],
+          [14, "GROUP_NT_AUTH_LOCAL_ACCOUNT"],
+          [15, "GROUP_NT_AUTH_LOCAL_ACCOUNT_AND_ADMIN"],
+          [16, "GROUP_NT_AUTH_INTERACTIVE"],
+          [17, "GROUP_NT_AUTH_ANONYMOUS"],
+          [18, "GROUP_NT_AUTH_AUTHENTICATED_USERS"],
+          [19, "GROUP_CONSOLE_LOGON"],
+          [20, "GROUP_NT_SERVICE_TRUSTEDINSTALLER"],
+          [32, "GROUP_DOMAIN_ADMINISTRATOR"],
+          [33, "GROUP_DOMAIN_USER"],
+          [34, "GROUP_DOMAIN_GUEST"],
+          [35, "GROUP_DOMAIN_ENTERPRISE_ADMIN"],
+          [36, "GROUP_DOMAIN_PROTECTED_USERS"],
+          [37, "GROUP_DOMAIN_POLICY_ADMIN"],
+          [38, "GROUP_DOMAIN_CERT_ADMIN"],
+          [39, "GROUP_DOMAIN_KEY_ADMIN"],
+          [40, "GROUP_DOMAIN_ENTERPRISE_KEY_ADMIN"]
+      ],
+      as="UserGroupsBitmask_mask",
+      separator=", "
+  )

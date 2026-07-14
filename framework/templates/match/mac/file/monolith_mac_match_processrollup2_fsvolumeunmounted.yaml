@@ -1,0 +1,162 @@
+name: monolith_mac_match_processrollup2_fsvolumeunmounted
+description: Joins FsVolumeUnmounted events with ProcessRollup2 events, surfacing volume unmount operations enriched with the responsible process context. Useful for tracking volume lifecycle (mount/unmount pairs) and detecting forced ejection patterns.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- match
+- processrollup2
+- fsvolumeunmounted
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ L1 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Builds a lookup table of ProcessRollup2 events on Mac, keyed by TargetProcessId (the process the event describes)
+  defineTable(
+      query={
+        #event_simpleName=ProcessRollup2 event_platform=Mac
+        | $monolith_convert_file_extension()    // Parses FileName into FileExtension before extraction
+        | $monolith_convert_uid()               // Adds UID_readable sibling before extraction
+        | $monolith_convert_gid()               // Adds GID_readable sibling before extraction
+        | $monolith_mac_decode_processrollup2() // Decodes MachOSubType (8 vals) and CodeSigningFlags (27-bit mask)
+      },
+      name=processes,
+      include=[
+          // ▰▰▰[ Match Key ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetProcessId,         // UPID of the process; joins to FsVolumeUnmounted.falconPID
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,            // Endpoint hostname (envelope; same on both events)
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                // OS account that owns the writing process
+          UID,                     // Effective UID
+          UID_readable,            // Human-readable UID label (from convert_uid helper)
+          GID,                     // Effective GID
+          GID_readable,            // Human-readable GID label (from convert_gid helper)
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ParentBaseFileName,      // Basename of the parent binary
+          ContextBaseFileName,     // Basename of the actor process binary
+          RawProcessId,            // OS-level PID of the writing process
+          // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          FilePath,                // Directory portion of the process binary path (from ImageFileName parser)
+          FileName,                // Basename of the process binary
+          FileExtension,           // Last extension of the process binary; "(none)" for most binaries
+          SHA256HashData,          // SHA-256 of the process binary
+          // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          CommandLine              // Full command line of the actor process
+      ]
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Pulls FsVolumeUnmounted events to be enriched with process context from L1
+  | #event_simpleName=FsVolumeUnmounted event_platform=Mac
+  | $monolith_utility_falcon_pid()              // Translates ContextProcessId into falconPID (this event lacks TargetProcessId natively)
+
+  // ▰▰▰▰▰▰[ MATCH STATEMENT ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Inner join: keep only L2 events whose falconPID matches a TargetProcessId in the processes table
+  | match(
+      table=processes,
+      field=falconPID,                          // L2-side UPID (derived from ContextProcessId by helper)
+      column=TargetProcessId                    // L1-side UPID (PR2's TargetProcessId)
+  )
+
+  // ▰▰▰▰▰▰[ L2 SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Enrichment for the L2 side (applied after the match so PR2 fields are also in scope)
+  | $monolith_convert_time_utc()                // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()           // Decodes Falcon numeric enums/bitfields into readable strings
+
+  // ▰▰▰▰▰▰[ GROUP BY LOGIC ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Collapses many joined rows into one row per group key, with all related fields collected
+  | groupBy(
+      [
+          aid,                         // Falcon agent ID; uniquely identifies the host
+          VolumeSessionUUID,           // Per-mount session correlation (joins to the prior FsVolumeMounted event)
+          VolumeMountPoint             // Where the volume had been mounted
+      ],
+      function=[
+          collect([
+              // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              utc_time,                    // Human-readable UTC event time (from helper)
+              // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ComputerName,                // Endpoint hostname (from L1)
+              // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              UserName,                    // OS account owning the actor process (from L1)
+              UID,                         // Effective UID (from L1)
+              UID_readable,                // Human-readable UID (from L1 helper)
+              GID,                         // Effective GID (from L1)
+              GID_readable,                // Human-readable GID (from L1 helper)
+              // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              TargetProcessId,             // UPID of the actor process (from L1)
+              RawProcessId,                // OS-level PID (from L1)
+              ParentBaseFileName,          // Basename of the parent binary (from L1)
+              ContextBaseFileName,         // Basename of the actor process binary (from L1)
+              // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              FilePath,                    // Directory of the actor process binary (from L1)
+              FileName,                    // Basename of the actor process binary (from L1)
+              FileExtension,               // Extension of the actor process binary (from L1)
+              SHA256HashData,              // SHA-256 of the actor process binary (from L1)
+              // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              CommandLine,                 // Full command line of the actor process (from L1)
+              // ▰▰▰[ Time (L2) ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              ContextTimeStamp,            // Raw event time on host
+              // ▰▰▰[ Unmounted Volume ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+              VolumeName,                  // Friendly volume name
+              VolumeMountPoint,            // Where the volume had been mounted
+              VolumeOriginPath,            // Source path the volume came from
+              VolumeSessionUUID,           // Mount session UUID (joins to FsVolumeMounted)
+              VolumeMediaBSDName,          // BSD device name
+              VolumeIsNetwork,             // 1 = network share; 0 = local
+              VolumeMediaRemovable,        // Removable media flag
+              TreeId                       // Process tree ID
+          ])
+      ],
+      limit=max
+  )
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // Final analyst view: one row per group key with full collected context for triage
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                    // Human-readable UTC event time (from helper)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                // Endpoint hostname (from L1)
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,                    // OS account owning the actor process (from L1)
+          UID,                         // Effective UID (from L1)
+          UID_readable,                // Human-readable UID (from L1 helper)
+          GID,                         // Effective GID (from L1)
+          GID_readable,                // Human-readable GID (from L1 helper)
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetProcessId,             // UPID of the actor process (from L1)
+          RawProcessId,                // OS-level PID (from L1)
+          ParentBaseFileName,          // Basename of the parent binary (from L1)
+          ContextBaseFileName,         // Basename of the actor process binary (from L1)
+          // ▰▰▰[ Process Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          FilePath,                    // Directory of the actor process binary (from L1)
+          FileName,                    // Basename of the actor process binary (from L1)
+          FileExtension,               // Extension of the actor process binary (from L1)
+          SHA256HashData,              // SHA-256 of the actor process binary (from L1)
+          // ▰▰▰[ Execution ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          CommandLine,                 // Full command line of the actor process (from L1)
+          // ▰▰▰[ Time (L2) ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextTimeStamp,            // Raw event time on host
+          // ▰▰▰[ Unmounted Volume ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          VolumeName,                  // Friendly volume name
+          VolumeMountPoint,            // Where the volume had been mounted
+          VolumeOriginPath,            // Source path the volume came from
+          VolumeSessionUUID,           // Mount session UUID (joins to FsVolumeMounted)
+          VolumeMediaBSDName,          // BSD device name
+          VolumeIsNetwork,             // 1 = network share; 0 = local
+          VolumeMediaRemovable,        // Removable media flag
+          TreeId                       // Process tree ID
+      ],
+      limit=max
+  )

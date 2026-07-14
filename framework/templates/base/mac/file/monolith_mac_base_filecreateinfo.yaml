@@ -1,0 +1,66 @@
+name: monolith_mac_base_filecreateinfo
+description: Base query for FileCreateInfo events on Mac. Surfaces generic file-creation telemetry with POSIX-permission decoding, attributed to the responsible process. Captures file creations that do not fire a more specific *FileWritten event (Xcode build intermediates, app temp files, scratch data, etc.). Minimal 8-field schema with no decoder needed; SHA256 must come from joining ContextProcessId to ProcessRollup2.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- filecreateinfo
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=FileCreateInfo event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()           // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()      // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_uid()                // Adds UID_readable sibling
+  | $monolith_convert_gid()                // Adds GID_readable sibling
+  | $monolith_convert_unix_posix_mode()    // Decodes UnixMode into UnixMode_octal + Owner/Group/Other perm strings
+  | $monolith_convert_file_extension()     // Parses FileName into FileExtension; "(none)" if absent
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,              // Human-readable UTC event time (from helper)
+          ContextTimeStamp,      // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,          // Endpoint hostname
+          aid,                   // Falcon agent ID; primary host key
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,              // OS account (Falcon enrichment from UID; not in raw event schema but reliably populated)
+          UID,                   // File-owner UID at creation (Unix)
+          UID_readable,          // Human-readable UID label (from convert_uid helper)
+          GID,                   // File-owner GID at creation (Unix; 20 = "staff", 0 = "wheel", etc.)
+          GID_readable,          // Human-readable GID label (from convert_gid helper)
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,      // UPID of the creating process; joins to ProcessRollup2
+          ContextThreadId,       // UTID of the creating thread; commonly 0 (sentinel) for kernel-level creates
+          TreeId,                // Process tree ID; groups related events
+          // ▰▰▰[ Created File ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName,        // Full path of the created file
+          FilePath,              // Directory portion of TargetFileName (parser-derived)
+          FileName,              // Basename of TargetFileName (parser-derived)
+          FileExtension,         // Last extension of FileName (from helper); "(none)" if absent
+          // ▰▰▰[ File Permissions ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UnixMode,              // Raw POSIX mode bits at creation (e.g. 384 = 0o600)
+          UnixMode_octal,        // Octal POSIX mode (decoded; e.g. "600")
+          OwnerPerms,            // Owner permissions (decoded; e.g. "rw-")
+          GroupPerms,            // Group permissions (decoded)
+          OtherPerms,            // Other permissions (decoded)
+          // ▰▰▰[ Rate Limiting ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          BoundingLimitCount,    // Sensor-observed count when throttling kicked in (sparse: ~0.4% of events)
+          BoundingLimitDuration  // Throttling window in ms (e.g. 3600000 = 1 hour)
+      ],
+      limit=max
+  )

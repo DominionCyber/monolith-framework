@@ -1,0 +1,42 @@
+name: monolith_mac_decode_moduledetectinfo
+description: 'Decodes ModuleLoadMechanism (2-value enum) and TemplateDisposition (10-value enum) on ModuleDetectInfo events.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- moduledetectinfo
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for ModuleLoadMechanism (2 value branches; final `*` is the fallthrough)
+  | case {
+      ModuleLoadMechanism = "0" | ModuleLoadMechanism := "STANDARD";
+      ModuleLoadMechanism = "1" | ModuleLoadMechanism := "REFLECTIVE";
+      *
+  }
+
+  // case {}: enum decoder for TemplateDisposition (10 value branches; final `*` is the fallthrough)
+  | case {
+      TemplateDisposition = "0"  | TemplateDisposition := "TEMPLATE_DISPOSITION_NOACTION";
+      TemplateDisposition = "3"  | TemplateDisposition := "TEMPLATE_DISPOSITION_ANALYSIS";
+      TemplateDisposition = "4"  | TemplateDisposition := "TEMPLATE_DISPOSITION_SENSOR_ONLY";
+      TemplateDisposition = "10" | TemplateDisposition := "TEMPLATE_DISPOSITION_INDICATOR";
+      TemplateDisposition = "20" | TemplateDisposition := "TEMPLATE_DISPOSITION_DETECT";
+      TemplateDisposition = "25" | TemplateDisposition := "TEMPLATE_DISPOSITION_OPERATION_BLOCK";
+      TemplateDisposition = "30" | TemplateDisposition := "TEMPLATE_DISPOSITION_PREVENT";
+      TemplateDisposition = "60" | TemplateDisposition := "TEMPLATE_DISPOSITION_PREVENT_KILLPARENT";
+      TemplateDisposition = "61" | TemplateDisposition := "TEMPLATE_DISPOSITION_PREVENT_KILLSOURCE";
+      TemplateDisposition = "70" | TemplateDisposition := "TEMPLATE_DISPOSITION_CONTAINMENT_FS_SERVER";
+      *
+  }

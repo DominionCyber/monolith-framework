@@ -1,0 +1,33 @@
+name: monolith_convert_gid
+description: 'Maps numeric POSIX GID to a human-readable group label in the new field GID_readable. Unknown GIDs surface the raw numeric value so the column is always populated.'
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- convert
+- posix_gid
+- posix
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ CONVERSION ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | case {                                              // case {}: write GID_readable; original GID untouched
+      GID = "0"  | GID_readable := "wheel/root";        //   0 = wheel (admin group; root)
+      GID = "20" | GID_readable := "staff";             //   20 = staff (default interactive-user group on macOS)
+      GID = "99" | GID_readable := "nobody";            //   99 = nobody group
+      *          | GID_readable := GID;                 //   fallthrough: copy raw GID to keep column populated
+  }

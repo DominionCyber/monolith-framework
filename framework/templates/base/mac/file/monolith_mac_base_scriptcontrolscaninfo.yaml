@@ -1,0 +1,56 @@
+name: monolith_mac_base_scriptcontrolscaninfo
+description: Base query for ScriptControlScanInfo events. Decodes script-content scan telemetry on macOS.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- scriptcontrolscaninfo
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=ScriptControlScanInfo event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                  // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()             // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_size()                 // Computes CommonSize from OriginalContentLength (TB/GB/MB/KB)
+  | $monolith_utility_script_content_length()     // Computes ScriptContentLength (character count of ScriptContent)
+  | $monolith_mac_decode_scriptcontrolscaninfo()  // Decodes the ScriptType enum into readable strings (55 values)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,              // Human-readable UTC event time (from helper)
+          ContextTimeStamp,      // Raw event time on host (epoch + ms); envelope, not in schema
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,          // Endpoint hostname
+          aid,                   // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,      // UPID of the scanning process; joins to ProcessRollup2
+          // ▰▰▰[ Script Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ScriptContentName,     // Full path of the script content scanned (the file the content came from)
+          ScriptInterpreter,     // Interpreter declared for the script (e.g. bash, python, osascript)
+          IsInline,              // 1 if the content was an inline script (no on-disk file), 0 if it came from a file
+          // ▰▰▰[ Classification ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ScriptType,            // Falcon's content-language classification (decoded by decode helper; 55-value enum)
+          MatchConfidence,       // Classifier confidence; empty when ScriptType is empty
+          // ▰▰▰[ Content ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ScriptContent,         // The actual script content the sensor scanned (can be large; truncated in table view)
+          ScriptContentLength,   // Character count of ScriptContent (from utility helper; Unicode grapheme clusters)
+          OriginalContentLength, // Length of the scanned content in bytes
+          CommonSize,            // Content size, human-readable (from convert_file_size helper)
+          ContentSHA256HashData  // SHA-256 of the scanned content (note: name differs from SHA256HashData on *FileWritten events)
+      ],
+      limit=max
+  )

@@ -1,0 +1,68 @@
+name: monolith_mac_base_directorycreate
+description: Base query for DirectoryCreate events. Decodes directory-creation metadata.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- directorycreate
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=DirectoryCreate event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()           // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()      // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_directorycreate() // Decodes VnodeType enum into readable strings (VDIR, VREG, ...)
+  | $monolith_convert_unix_posix_mode()    // Decodes UnixMode into OwnerPerms / GroupPerms / OtherPerms
+  | $monolith_convert_uid()                // Maps known POSIX UIDs to readable names; falls back to the raw UID
+  | $monolith_convert_gid()                // Maps known POSIX GIDs to readable names; falls back to the raw GID
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,              // Human-readable UTC event time (from helper)
+          ContextTimeStamp,      // Raw event time on host (epoch + ms); no readable conversion yet
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,          // Endpoint hostname
+          aid,                   // Falcon agent ID; primary host key
+          // ▰▰▰[ User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UserName,              // User who created the directory (~1% of events lack this)
+          UID,                   // Raw POSIX user ID
+          UID_readable,          // Decoded POSIX user name (from convert_uid helper)
+          GID,                   // Raw POSIX group ID
+          GID_readable,          // Decoded POSIX group name (from convert_gid helper)
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,      // UPID of the creating process; joins to ProcessRollup2
+          ContextThreadId,       // Thread ID within the creating process
+          TreeId,                // Process tree ID; groups related events
+          // ▰▰▰[ Directory Details ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetDirectoryName,   // Full path of the created directory (schema-canonical name)
+          TargetFileName,        // Same path as TargetDirectoryName on this event
+          FilePath,              // Directory portion of TargetFileName (parser-derived)
+          FileName,              // Basename portion of TargetFileName (parser-derived)
+          VnodeType,             // Vnode type (decoded by helper, normally "VDIR" for this event)
+          Flags,                 // Raw flags bitmask; bit meanings not yet documented
+          // ▰▰▰[ Permissions ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          UnixMode,              // Raw permissions integer (e.g. 448 = 0o700)
+          UnixMode_octal,        // Octal form of UnixMode (e.g. "700") (from helper)
+          OwnerPerms,            // Owner permissions string (e.g. "rwx") (from helper)
+          GroupPerms,            // Group permissions string (from helper)
+          OtherPerms,            // Other permissions string (from helper)
+          // ▰▰▰[ Rate Limiting ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          BoundingLimitCount,    // Sensor-observed count when throttling kicked in (sparse: ~5% of events)
+          BoundingLimitDuration  // Throttling window in ms (e.g. 3600000 = 1 hour)
+      ],
+      limit=max
+  )

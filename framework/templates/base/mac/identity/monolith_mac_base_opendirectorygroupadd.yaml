@@ -1,0 +1,50 @@
+name: monolith_mac_base_opendirectorygroupadd
+description: Base query for OpenDirectoryGroupAdd events. Decodes macOS OpenDirectory member addition activity.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- opendirectorygroupadd
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=OpenDirectoryGroupAdd event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                     // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()                // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_opendirectorygroupadd()     // Decodes ODErrorCode (63 values) and ODMemberType (MEMBER_USER_NAME/UUID/GROUP_UUID)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                      // Human-readable UTC event time (from helper)
+          ContextTimeStamp,              // Raw event time on host (epoch + ms); no readable conversion yet
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                  // Endpoint hostname
+          aid,                           // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,              // UPID of the process performing the membership add; joins to ProcessRollup2
+          // ▰▰▰[ Open Directory Operation ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ODNodeName,                    // OD node where the group lives (e.g. /Local/Default for local groups)
+          ODDatabasePath,                // On-disk path to the OD database (e.g. /var/db/dslocal/nodes/Default)
+          ODGroupName,                   // Group being modified (e.g. admin, wheel, _developer, _appserveradm)
+          ODMemberType,                  // How the member is identified (decoded: MEMBER_USER_NAME, MEMBER_USER_UUID, MEMBER_GROUP_UUID)
+          UserNames,                     // List of usernames being added to the group (structured JSON)
+          AuthenticationUuidsAsStrings,  // Authentication UUIDs of members being added (parser-derived friendly form)
+          AuthenticationUuids,           // Raw structured JSON wrapper around the UUID list (for parser-fidelity audits)
+          ODErrorCode                    // Operation result (decoded: SUCCESS, RECORD_PERMISSION_ERROR, ... 63 known values)
+      ],
+      limit=max
+  )

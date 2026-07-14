@@ -1,0 +1,86 @@
+name: monolith_mac_decode_scriptcontrolscaninfo
+description: Decodes event fields using conditional logic to standardize values across different event sources.
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- scriptcontrolscaninfo
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for ScriptType (55 value branches; final `*` is the fallthrough)
+  | case {
+      ScriptType = "0"  | ScriptType := "UNKNOWN";
+      ScriptType = "1"  | ScriptType := "ACTIONSCRIPT";
+      ScriptType = "2"  | ScriptType := "APPLESCRIPT";
+      ScriptType = "3"  | ScriptType := "ASP";
+      ScriptType = "4"  | ScriptType := "ASSEMBLY";
+      ScriptType = "5"  | ScriptType := "BATCHFILE";
+      ScriptType = "6"  | ScriptType := "C_FAMILY";
+      ScriptType = "7"  | ScriptType := "CLOJURE";
+      ScriptType = "8"  | ScriptType := "CMAKE";
+      ScriptType = "9"  | ScriptType := "COBOL";
+      ScriptType = "10" | ScriptType := "COFFEESCRIPT";
+      ScriptType = "11" | ScriptType := "COLDFUSION";
+      ScriptType = "12" | ScriptType := "COMMONLISP";
+      ScriptType = "13" | ScriptType := "CSHARP";
+      ScriptType = "14" | ScriptType := "CSS";
+      ScriptType = "15" | ScriptType := "CSV";
+      ScriptType = "16" | ScriptType := "DART";
+      ScriptType = "17" | ScriptType := "DOCKERFILE";
+      ScriptType = "18" | ScriptType := "DREAMMAKER";
+      ScriptType = "19" | ScriptType := "ELIXIR";
+      ScriptType = "20" | ScriptType := "ERLANG";
+      ScriptType = "21" | ScriptType := "FORTRAN";
+      ScriptType = "22" | ScriptType := "GO";
+      ScriptType = "23" | ScriptType := "HASKELL";
+      ScriptType = "24" | ScriptType := "HTML";
+      ScriptType = "25" | ScriptType := "JAVA_FAMILY";
+      ScriptType = "26" | ScriptType := "JAVASCRIPT_FAMILY";
+      ScriptType = "27" | ScriptType := "JAVASERVERPAGES";
+      ScriptType = "28" | ScriptType := "JSON";
+      ScriptType = "29" | ScriptType := "JULIA";
+      ScriptType = "30" | ScriptType := "KOTLIN";
+      ScriptType = "31" | ScriptType := "MAKEFILE";
+      ScriptType = "32" | ScriptType := "MATLAB";
+      ScriptType = "33" | ScriptType := "OBJECTIVE_CPP";
+      ScriptType = "34" | ScriptType := "OCAML";
+      ScriptType = "35" | ScriptType := "PASCAL";
+      ScriptType = "36" | ScriptType := "PERL";
+      ScriptType = "37" | ScriptType := "PHP";
+      ScriptType = "38" | ScriptType := "POWERSHELL";
+      ScriptType = "39" | ScriptType := "PYTHON";
+      ScriptType = "40" | ScriptType := "R";
+      ScriptType = "41" | ScriptType := "RUBY";
+      ScriptType = "42" | ScriptType := "RUST";
+      ScriptType = "43" | ScriptType := "SCALA";
+      ScriptType = "44" | ScriptType := "SHELL";
+      ScriptType = "45" | ScriptType := "SQL";
+      ScriptType = "46" | ScriptType := "SWIFT";
+      ScriptType = "47" | ScriptType := "TEX";
+      ScriptType = "48" | ScriptType := "TEXT";
+      ScriptType = "49" | ScriptType := "TOML";
+      ScriptType = "50" | ScriptType := "VERILOG";
+      ScriptType = "51" | ScriptType := "VHDL";
+      ScriptType = "52" | ScriptType := "VISUALBASIC";
+      ScriptType = "53" | ScriptType := "XML";
+      ScriptType = "54" | ScriptType := "YAML";
+      *
+  }

@@ -1,0 +1,72 @@
+name: monolith_mac_decode_networkconnectip6
+description: 'Decodes Protocol (9-value enum), ConnectionDirection (5-value enum), ConnectionFlags (5-flag bitmask), and TcpConnectErrorCode (9-value enum) on NetworkConnectIP6 events.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- networkconnectip6
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for Protocol (9 value branches; final `*` is the fallthrough)
+  | case {
+      Protocol = "0"   | Protocol := "IP";
+      Protocol = "1"   | Protocol := "ICMP";
+      Protocol = "2"   | Protocol := "IGMP";
+      Protocol = "6"   | Protocol := "TCP";
+      Protocol = "17"  | Protocol := "UDP";
+      Protocol = "41"  | Protocol := "IPV6";
+      Protocol = "47"  | Protocol := "GRE";
+      Protocol = "58"  | Protocol := "ICMPV6";
+      Protocol = "255" | Protocol := "UNKNOWN";
+      *
+  }
+
+  // case {}: enum decoder for ConnectionDirection (5 value branches; final `*` is the fallthrough)
+  | case {
+      ConnectionDirection = "0" | ConnectionDirection := "OUTBOUND";
+      ConnectionDirection = "1" | ConnectionDirection := "INBOUND";
+      ConnectionDirection = "2" | ConnectionDirection := "NEITHER";
+      ConnectionDirection = "3" | ConnectionDirection := "INBOUND & OUTBOUND";
+      ConnectionDirection = "4" | ConnectionDirection := "UNKNOWN";
+      *
+  }
+
+  // bitfield:extractFlagsAsString(): expands ConnectionFlags (5 flags) into the new field ConnectionFlags_mask
+  | bitfield:extractFlagsAsString(
+      field="ConnectionFlags",
+      flagNames=[
+          [0, "RAW_SOCKET"],
+          [1, "PROMISCUOUS_MODE_SIO_RCVALL"],
+          [2, "PROMISCUOUS_MODE_SIO_RCVALL_IGMPMCAST"],
+          [3, "PROMISCUOUS_MODE_SIO_RCVALL_MCAST"],
+          [4, "IS_LOOPBACK"]
+      ],
+      as="ConnectionFlags_mask",
+      separator=", "
+  )
+
+  // case {}: enum decoder for TcpConnectErrorCode (9 value branches; final `*` is the fallthrough)
+  | case {
+      TcpConnectErrorCode = "0"   | TcpConnectErrorCode := "TCP_CON_SUCCESS";
+      TcpConnectErrorCode = "92"  | TcpConnectErrorCode := "TCP_CON_NO_PROTO_ERROR";
+      TcpConnectErrorCode = "101" | TcpConnectErrorCode := "TCP_CON_NET_UNREACH_ERROR";
+      TcpConnectErrorCode = "102" | TcpConnectErrorCode := "TCP_CON_NET_RESET_ERROR";
+      TcpConnectErrorCode = "103" | TcpConnectErrorCode := "TCP_CON_CONN_ABORTED_ERROR";
+      TcpConnectErrorCode = "106" | TcpConnectErrorCode := "TCP_CON_IS_CONN_ERROR";
+      TcpConnectErrorCode = "110" | TcpConnectErrorCode := "TCP_CON_TIMED_OUT_ERROR";
+      TcpConnectErrorCode = "111" | TcpConnectErrorCode := "TCP_CON_REFUSED_ERROR";
+      TcpConnectErrorCode = "113" | TcpConnectErrorCode := "TCP_CON_HOST_UNREACH_ERROR";
+      *
+  }

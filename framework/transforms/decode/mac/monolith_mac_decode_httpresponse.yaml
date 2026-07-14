@@ -1,0 +1,78 @@
+name: monolith_mac_decode_httpresponse
+description: 'Decodes HttpStatus (69-value enum), HttpMethod (41-value enum), ConnectionDirection (5-value enum), and TrafficDirection (2-value enum) on HttpResponse events. HttpStatus values are the raw numeric HTTP status codes (200, 404, 500, etc.); decoded labels prepend the code with the canonical reason phrase.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- httpresponse
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for ConnectionDirection (5 value branches; final `*` is the fallthrough)
+  | case {
+      ConnectionDirection = "0" | ConnectionDirection := "OUTBOUND";
+      ConnectionDirection = "1" | ConnectionDirection := "INBOUND";
+      ConnectionDirection = "2" | ConnectionDirection := "NEITHER";
+      ConnectionDirection = "3" | ConnectionDirection := "BOTH";
+      ConnectionDirection = "4" | ConnectionDirection := "UNKNOWN";
+      *
+  }
+
+  // case {}: enum decoder for TrafficDirection (2 value branches; final `*` is the fallthrough)
+  | case {
+      TrafficDirection = "1" | TrafficDirection := "INGRESS";
+      TrafficDirection = "2" | TrafficDirection := "EGRESS";
+      *
+  }
+
+  // case {}: enum decoder for HttpStatus (23 value branches; final `*` is the fallthrough)
+  | case {
+      HttpStatus = "200" | HttpStatus := "200_OK";
+      HttpStatus = "201" | HttpStatus := "201_CREATED";
+      HttpStatus = "204" | HttpStatus := "204_NO_CONTENT";
+      HttpStatus = "206" | HttpStatus := "206_PARTIAL_CONTENT";
+      HttpStatus = "301" | HttpStatus := "301_MOVED_PERMANENTLY";
+      HttpStatus = "302" | HttpStatus := "302_FOUND";
+      HttpStatus = "303" | HttpStatus := "303_SEE_OTHER";
+      HttpStatus = "304" | HttpStatus := "304_NOT_MODIFIED";
+      HttpStatus = "307" | HttpStatus := "307_TEMPORARY_REDIRECT";
+      HttpStatus = "308" | HttpStatus := "308_PERMANENT_REDIRECT";
+      HttpStatus = "400" | HttpStatus := "400_BAD_REQUEST";
+      HttpStatus = "401" | HttpStatus := "401_UNAUTHORIZED";
+      HttpStatus = "403" | HttpStatus := "403_FORBIDDEN";
+      HttpStatus = "404" | HttpStatus := "404_NOT_FOUND";
+      HttpStatus = "405" | HttpStatus := "405_METHOD_NOT_ALLOWED";
+      HttpStatus = "408" | HttpStatus := "408_REQUEST_TIMEOUT";
+      HttpStatus = "409" | HttpStatus := "409_CONFLICT";
+      HttpStatus = "429" | HttpStatus := "429_TOO_MANY_REQUESTS";
+      HttpStatus = "500" | HttpStatus := "500_INTERNAL_SERVER_ERROR";
+      HttpStatus = "501" | HttpStatus := "501_NOT_IMPLEMENTED";
+      HttpStatus = "502" | HttpStatus := "502_BAD_GATEWAY";
+      HttpStatus = "503" | HttpStatus := "503_SERVICE_UNAVAILABLE";
+      HttpStatus = "504" | HttpStatus := "504_GATEWAY_TIMEOUT";
+      *
+  }
+
+  // case {}: enum decoder for HttpMethod (8 value branches; final `*` is the fallthrough)
+  | case {
+      HttpMethod = "1"  | HttpMethod := "GET";
+      HttpMethod = "2"  | HttpMethod := "POST";
+      HttpMethod = "3"  | HttpMethod := "PUT";
+      HttpMethod = "4"  | HttpMethod := "DELETE";
+      HttpMethod = "5"  | HttpMethod := "PATCH";
+      HttpMethod = "6"  | HttpMethod := "HEAD";
+      HttpMethod = "7"  | HttpMethod := "OPTIONS";
+      HttpMethod = "8"  | HttpMethod := "CONNECT";
+      *
+  }

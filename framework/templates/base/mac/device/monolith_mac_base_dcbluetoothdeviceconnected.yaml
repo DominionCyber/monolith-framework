@@ -1,0 +1,46 @@
+name: monolith_mac_base_dcbluetoothdeviceconnected
+description: 'Base query for DcBluetoothDeviceConnected events. Decodes Bluetooth device-connection metadata including device identity and BT address type. NO SAMPLE DATA available at build time.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- dcbluetoothdeviceconnected
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=DcBluetoothDeviceConnected event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                      // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()                 // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_dcbluetoothdeviceconnected() // Decodes BluetoothDeviceType (3 vals), BluetoothDeviceAddressType (4 vals) in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,         // Human-readable UTC event time (from helper)
+          ContextTimeStamp, // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName, // Endpoint hostname
+          aid,          // Falcon agent ID; primary host key
+          // ▰▰▰[ Bluetooth Device ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          DeviceManufacturer,         // Manufacturer string from device pairing record
+          DeviceProduct,              // Product name from device pairing record
+          DeviceVendorId,             // Bluetooth SIG Vendor ID
+          DeviceProductId,            // Product ID assigned by vendor
+          BluetoothDeviceAddressType, // BT address type (decoded; 4 values: PUBLIC, RANDOM_STATIC, RANDOM_RESOLVABLE, RANDOM_NON_RESOLVABLE)
+          BluetoothDeviceType         // BT device type (decoded; 3 values: CLASSIC, LE, DUAL)
+      ],
+      limit=max
+  )

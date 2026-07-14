@@ -1,0 +1,66 @@
+name: monolith_mac_base_tlsclienthello
+description: 'Base query for TlsClientHello events on Mac. Decodes Falcon-extracted TLS handshake metadata (version, SNI, JA3, JA4, ALPN) with full process context and effective-endpoint enrichment.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- tlsclienthello
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=TlsClientHello event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()          // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()     // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_mac_decode_tlsclienthello() // Decodes TlsVersion, ConnectionDirection, TrafficDirection in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,                     // Human-readable UTC event time (from helper)
+          ContextTimeStamp,             // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,                 // Endpoint hostname
+          aid,                          // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,             // UPID of the TLS-initiating process; joins to ProcessRollup2
+          ImageFileName,                // Full path of the requesting process binary
+          CommandLine,                  // Command line of the requesting process
+          ProxyingProcessId,            // UPID of the proxying process
+          // ▰▰▰[ Connection Direction ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ConnectionDirection,          // OUTBOUND / INBOUND / NEITHER / BOTH / UNKNOWN (decoded; 5 values)
+          TrafficDirection,             // Traffic direction (decoded; 2 values: INGRESS, EGRESS)
+          // ▰▰▰[ Endpoints (Direct) ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          LocalAddressIP4,              // Local IPv4 address (parser-derived enrichment)
+          LocalPort,                    // Local TCP port
+          RemoteAddressIP4,             // Remote IPv4 address (TLS server)
+          RemoteAddressIP6,             // Remote IPv6 address
+          RemotePort,                   // Remote TCP port (usually 443)
+          DomainName,                   // Domain name (parsed from TlsServerName)
+          Url,                          // Full URL string of the target connection
+          // ▰▰▰[ Endpoints (Effective, post-proxy) ]▰▰▰▰▰▰▰▰▰▰
+          EffectiveRemoteAddressIP4,    // Effective remote IPv4 after proxy unwrapping
+          EffectiveRemoteAddressIP6,    // Effective remote IPv6 after proxy unwrapping
+          EffectiveRemotePort,          // Effective remote port after proxy unwrapping
+          EffectiveDomainName,          // Effective domain after proxy unwrapping
+          // ▰▰▰[ TLS Handshake ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TlsVersion,                   // TLS version (decoded; 4 values: TLS_1_0, TLS_1_1, TLS_1_2, TLS_1_3)
+          TlsServerName,                // Server Name Indication from ClientHello (target hostname)
+          TlsApplicationLayerProtocols, // ALPN-offered protocols (comma-separated, e.g. "h2,http/1.1")
+          TlsClientFingerprintJa3,      // JA3 fingerprint hash of the ClientHello
+          TlsClientFingerprintJa4      // JA4 fingerprint hash of the ClientHello (newer, more structured than JA3)
+      ],
+      limit=max
+  )

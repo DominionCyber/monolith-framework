@@ -1,0 +1,37 @@
+name: monolith_mac_decode_sudocommandattempt
+description: Decodes event fields using conditional logic to standardize values across different event sources.
+visualization:
+  options:
+    columns:
+    - fieldName: '@timestamp'
+      format: datetime
+      type: field
+      width: 200
+    - groupByPrefix: false
+      header: Field List
+      type: fieldList
+    newestAtBottom: true
+    showOnlyFirstLine: false
+  type: list-view
+labels:
+- monolith_hunt_framework
+- asset
+- decode
+- sudocommandattempt
+- macos
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ DECODE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  // case {}: enum decoder for SudoPluginType (6 value branches; final `*` is the fallthrough)
+  | case {
+      SudoPluginType = "0" | SudoPluginType := "UNKNOWN";
+      SudoPluginType = "1" | SudoPluginType := "FRONT_END";
+      SudoPluginType = "2" | SudoPluginType := "POLICY";
+      SudoPluginType = "3" | SudoPluginType := "IO";
+      SudoPluginType = "4" | SudoPluginType := "AUDIT";
+      SudoPluginType = "5" | SudoPluginType := "APPROVAL";
+      *
+  }

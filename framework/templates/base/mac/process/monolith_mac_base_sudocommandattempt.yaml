@@ -1,0 +1,58 @@
+name: monolith_mac_base_sudocommandattempt
+description: Base query for SudoCommandAttempt events. Decodes sudo invocations for privilege-escalation hunts.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- sudocommandattempt
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=SudoCommandAttempt event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                  // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()             // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_extension()            // Parses FileName into FileExtension; "(none)" for most binaries
+  | $monolith_mac_decode_sudocommandattempt()     // Decodes SudoPluginType (UNKNOWN, FRONT_END, POLICY, IO, AUDIT, APPROVAL)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,            // Human-readable UTC event time (from helper)
+          ContextTimeStamp,    // Raw event time on host (epoch + ms); no readable conversion yet
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,        // Endpoint hostname
+          aid,                 // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,    // UPID of the process invoking sudo; joins to ProcessRollup2 for the actor
+          ResponsiblePid,      // UPID of the user-facing responsible process (Mac-specific)
+          // ▰▰▰[ Sudo User ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          OriginalUserName,    // Username of the session BEFORE sudo
+          OriginalUserID,      // UID of the session BEFORE sudo
+          NewUsername,         // Username being switched TO (note schema lowercase 'n')
+          NewUserID,           // UID being switched TO; UID 0 = root escalation
+          // ▰▰▰[ Target Binary ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ImageFileName,       // Full path of the binary being executed under sudo
+          FilePath,            // Directory portion (parser-derived)
+          FileName,            // Basename portion (parser-derived)
+          FileExtension,       // Last extension of FileName (from helper); "(none)" for most binaries
+          // ▰▰▰[ Sudo Plugin ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          SudoPluginName,      // Name of the sudo plugin that handled the attempt (sudoers, sssd, custom)
+          SudoPluginType,      // Plugin category (decoded: POLICY, IO, AUDIT, APPROVAL, FRONT_END, UNKNOWN)
+          // ▰▰▰[ Result ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          SudoFailureMessage   // Empty on success; populated with sudo/PAM error text on failure
+      ],
+      limit=max
+  )

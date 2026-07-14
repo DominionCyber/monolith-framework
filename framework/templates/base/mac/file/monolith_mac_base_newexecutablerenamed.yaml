@@ -1,0 +1,53 @@
+name: monolith_mac_base_newexecutablerenamed
+description: Base query for NewExecutableRenamed events. Decode transform pending; raw rename metadata surfaced.
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- newexecutablerenamed
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=NewExecutableRenamed event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()                 // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()            // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_size()                // Computes CommonSize: byte size in human-readable form (TB/GB/MB/KB)
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,          // Human-readable UTC event time (from helper)
+          ContextTimeStamp,  // Raw event time on host (epoch + ms); no readable conversion yet
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName,      // Endpoint hostname
+          aid,               // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,  // UPID of the renaming process; joins to ProcessRollup2
+          ContextThreadId,   // Thread ID within the renaming process
+          TreeId,            // Process tree ID; groups related events
+          // ▰▰▰[ Rename Details ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          SourceFileName,    // Pre-rename path
+          TargetFileName,    // Post-rename path
+          FilePath,          // Directory portion of TargetFileName (parser-derived)
+          FileName,          // Basename portion of TargetFileName (parser-derived)
+          Size,              // File size in bytes
+          CommonSize,        // File size, human-readable (from convert_file_size helper)
+          SHA256HashData     // SHA-256 of the file (decoded sentinels: STATIC_SHA256_DOPPELGANGING / STATIC_SHA256_SYSTEM if applicable)
+      ],
+      limit=max
+  )
+      limit=max
+  )

@@ -1,0 +1,63 @@
+name: monolith_mac_base_emailfilewritten
+description: 'Base query for EmailFileWritten events. Decodes file-write metadata for email message files.'
+visualization:
+  options:
+    cell-overflow: wrap-text
+    column-overflow: truncate
+    configured-columns: {}
+    row-numbers-enabled: false
+  type: table-view
+labels:
+- monolith_hunt_framework
+- base
+- emailfilewritten
+- mac
+$schema: https://schemas.humio.com/query/v0.6.0
+timeInterval:
+  isLive: false
+  start: 15m
+queryString: |-
+  // ▰▰▰▰▰▰[ SEARCH ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  #event_simpleName=EmailFileWritten event_platform=Mac
+
+  // ▰▰▰▰▰▰[ SEARCH ASSETS ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | $monolith_convert_time_utc()            // Formats `timestamp` into human-readable UTC (utc_time)
+  | $monolith_utility_falcon_helper()       // Decodes Falcon numeric enums/bitfields into readable strings
+  | $monolith_convert_file_size()           // Coalesces Size into ByteSize/CommonSize (human-readable size)
+  | $monolith_convert_removable_disk()      // Rewrites IsOnRemovableDisk 0/1 in-place to No/Yes
+  | $monolith_mac_decode_emailfilewritten() // Decodes FileCategory (11 vals) in place
+
+  // ▰▰▰▰▰▰[ TABLE ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+  | table(
+      [
+          // ▰▰▰[ Time ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          utc_time,         // Human-readable UTC event time (from helper)
+          ContextTimeStamp, // Raw event time on host (epoch + ms)
+          // ▰▰▰[ Host ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ComputerName, // Endpoint hostname
+          aid,          // Falcon agent ID; primary host key
+          // ▰▰▰[ Process Context ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          ContextProcessId,    // UPID of the writing process; joins to ProcessRollup2
+          ContextThreadId,     // Thread ID within the writing process
+          ContextBaseFileName, // Basename of the writing process binary
+          TreeId,              // Process tree ID; groups related events
+          UserName,            // User identity of the writing process
+          // ▰▰▰[ File Identity ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          TargetFileName, // Full path of the file being written
+          FilePath,       // Directory portion of TargetFileName (parser-derived)
+          FileName,       // Basename of TargetFileName (parser-derived)
+          FileCategory,   // File-category enum (decoded: ARCHIVES, OFFICE_DOCUMENTS, MULTIMEDIA_FILES, ... 11 values)
+          FileIdentifier, // Unique file ID for cross-event correlation
+          FileSourcePath, // Original source path (if file was moved/copied)
+          // ▰▰▰[ File Content & Size ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          Size,           // File size in bytes (raw)
+          CommonSize,     // Human-readable size (from helper)
+          SHA256HashData, // SHA-256 of the written file (sentinel values (STATIC_SHA256_DOPPELGANGING/SYSTEM) NOT decoded per framework rule)
+          MipInformation, // Microsoft Information Protection metadata (sensitivity labels) if present
+          // ▰▰▰[ Volume & Disk ]▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰
+          IsOnRemovableDisk,         // Yes/No (decoded from 0/1) - was the write to removable media?
+          VolumeSessionUUID,         // Per-mount volume session ID
+          DiskParentDeviceInstanceId // Parent disk device instance ID (for removable-media correlation)
+      ],
+      limit=max
+  )
